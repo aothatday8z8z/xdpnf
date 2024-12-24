@@ -11,12 +11,12 @@
 #include <linux/tcp.h>
 #include <linux/in.h>
 #include <bpf/bpf_endian.h>
-#include "xdpfw.h"
+#include "xdpnf.h"
 
 
 struct 
 {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, MAX_CHAINS);
     __type(key, __u32);
     __type(value, struct chain);
@@ -24,7 +24,7 @@ struct
 
 struct 
 {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, MAX_LIMITERS);
     __type(key, __u32);
     __type(value, struct rate_limiter);
@@ -65,7 +65,7 @@ struct icmphdr_common {
 #define IPV6_EXT_MAX_CHAIN 6
 #endif
 
-#define MAX_CHAIN_DEPTH 4
+#define MAX_CHAIN_DEPTH 2
 
 
 #define CHECK_RET(ret)                        \
@@ -305,134 +305,89 @@ static __always_inline int is_ipv6_match(struct ipv6_addr addr, struct ipv6_addr
     return TRUE;
 }
 
-static int always_inline rule_match(__u16 *pkt_len, struct header_match *hdrs, struct rule *rule)
-{
-	if (!rule_hdr_match(hdrs, &rule->hdr_match, rule->match_field_flags))
-		return FALSE;
-	if (rule->match_field_flags & MATCH_RATE_LIMIT)
-	{
-			return rule_rate_limit(pkt_len, rule);
-	}
-}
-
-static __always_inline int rule_rate_limit(__u16 *pkt_len, struct rule *rule)
-{
-	struct rate_limiter *c = bpf_map_lookup_elem(&limiters_map, &rule->rule_id);
-	if (c)
-	{
-		__u64 now, delta;
-
-		now = bpf_ktime_get_ns();
-		c->tokens += (now - c->last_update) * c->rate_limit;
-		c->last_update = now;
-
-		if (c->tokens > c->max_tokens)
-			c->tokens = c->max_tokens;
-
-		if (rule->exp_match.limit_type == LIMIT_PPS)
-			delta = c->tokens - 1;
-		else
-			delta = c->tokens - *pkt_len;
-
-		if (delta >= 0) {
-			c->tokens = delta;
-			bpf_map_update_elem(&limiters_map, &rule->rule_id, c, BPF_EXIST);
-			return TRUE;
-		}
-		
-		bpf_map_update_elem(&limiters_map, &rule->rule_id, c, BPF_EXIST);
-		return FALSE;
-	}
-	else 
-		return FALSE;
-}
-
-// Match packet hdr vs rule, return 1 if packet is matched, 0 otherwise
-static __always_inline int rule_hdr_match(struct header_match *hdrs, struct header_match *match, __u32 match_field_flags)
-{
-	int ret = TRUE;
-
-	if (!(match_field_flags & (MATCH_IPV4 | MATCH_IPV6)))
-		goto l4_match;
-
-	if (hdrs->l3_proto != match->l3_proto)
-		return FALSE;
-
-	if (hdrs->l3_proto == ETH_P_IP)
-	{
-		if ((match_field_flags & MATCH_SRC_IP_ADDR) && !is_ipv4_match(&(hdrs->src_ip.ipv4.addr), &(match->src_ip.ipv4)))
-			return FALSE;
-
-		if ((match_field_flags & MATCH_DST_IP_ADDR) && !is_ipv4_match(&(hdrs->dst_ip.ipv4.addr), &(match->dst_ip.ipv4)))
-			return FALSE;
-	}
-
-	if (hdrs->l3_proto == ETH_P_IPV6)
-	{
-		if ((match_field_flags & MATCH_SRC_IP_ADDR) && !is_ipv6_match(hdrs->src_ip.ipv6, match->src_ip.ipv6))
-			return FALSE;
-
-		if ((match_field_flags & MATCH_DST_IP_ADDR) && !is_ipv6_match(hdrs->dst_ip.ipv6, match->dst_ip.ipv6))
-			return FALSE;
-	}
-
-l4_match:
-	if (!(match_field_flags & (MATCH_ICMP | MATCH_TCP | MATCH_UDP)))
-		goto out;
-
-	if (hdrs->l4_proto != match->l4_proto)
-		return FALSE;
-
-	if (hdrs->l4_proto == IPPROTO_ICMP)
-	{
-		if ((match_field_flags & MATCH_ICMP_CODE) && (hdrs->icmp_code != match->icmp_code))
-			return FALSE;
-
-		if ((match_field_flags & MATCH_ICMP_TYPE) && (hdrs->icmp_type != match->icmp_type))
-			return FALSE;
-	}
-
-	if ((match_field_flags & MATCH_SPORT) && (hdrs->sport != match->sport))
-		return FALSE;
-
-	if ((match_field_flags & MATCH_DPORT) && (hdrs->dport != match->dport))
-		return FALSE;
-
-	if (hdrs->l4_proto == IPPROTO_TCP) TCP_FLAG_FIN
-	{
-		if ((match_field_flags & MATCH_TCP_FLAGS) && (hdrs->tcp_flags & match->tcp_flags) != match->tcp_flags)
-			return FALSE;
-	}
-
-out:
-	return ret;
-}
-
-static __always_inline int process_chain(__u16 *pkt_len, struct header_match *hdrs, __u32 chain_id) {
+static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, __u32 chain_id) {
     for (int depth = 0; depth < MAX_CHAIN_DEPTH; depth++) {
-        struct chain *c = bpf_map_lookup_elem(&chain_maps, &chain_id);
+        struct chain *c = bpf_map_lookup_elem(&chains_map, &chain_id);
         if (!c)
             return RL_ABORTED;
-		
-        for (__u32 i = 0; i < c->num_rules; i++) {
+
+        for (__u16 i = 0; i < MAX_RULES_PER_CHAIN; i++) {
 			struct rule *r = &c->rule_list[i];
 			if (r->match_field_flags == 0)
 				break;
-				
-            if (rule_match(pkt_len, hdrs, r)) {
-                switch (r->rule_action.action) {
-				case RL_ABORTED:
-                case RL_DROP:
-                case RL_ACCEPT:
-				case RL_TX:
-				case RL_REDIRECT:
-					return r->rule_action.action;
-                case RL_JUMP:
-                    chain_id = r->rule_action.chain_id;
-                    goto next_chain; 
-                default:
-                    break;
+			
+			__u32 match_hdr_fields = pkt_hdrs->match_field_flags & r->match_field_flags;
+
+			// Check protocol match
+			if ((match_hdr_fields & MATCH_PROTOCOL) != (r->match_field_flags & MATCH_PROTOCOL))
+				continue;
+			
+			// Check IPv4 addr match
+			if ((r->match_field_flags & MATCH_SRC_IPV4_ADDR) && !is_ipv4_match(&(pkt_hdrs->hdr_match.src_ip.ipv4.addr), &(r->hdr_match.src_ip.ipv4)))
+				continue;
+			if ((r->match_field_flags & MATCH_DST_IPV4_ADDR) && !is_ipv4_match(&(pkt_hdrs->hdr_match.dst_ip.ipv4.addr), &(r->hdr_match.dst_ip.ipv4)))
+				continue;
+
+			// Check IPv6 addr match
+			if ((r->match_field_flags & MATCH_SRC_IPV6_ADDR) && !is_ipv6_match(pkt_hdrs->hdr_match.src_ip.ipv6, r->hdr_match.src_ip.ipv6))
+				continue;
+			if ((r->match_field_flags & MATCH_DST_IPV6_ADDR) && !is_ipv6_match(pkt_hdrs->hdr_match.dst_ip.ipv6, r->hdr_match.dst_ip.ipv6))
+				continue;
+
+			// Check ICMP match
+			if ((r->match_field_flags & MATCH_ICMP_CODE) && (pkt_hdrs->hdr_match.icmp_code != r->hdr_match.icmp_code))
+				continue;
+			if ((r->match_field_flags & MATCH_ICMP_TYPE) && (pkt_hdrs->hdr_match.icmp_type != r->hdr_match.icmp_type))
+				continue;
+                
+			// Check port match	
+			if ((r->match_field_flags & MATCH_SPORT) && (pkt_hdrs->hdr_match.sport != r->hdr_match.sport))
+				continue;
+			if ((r->match_field_flags & MATCH_DPORT) && (pkt_hdrs->hdr_match.dport != r->hdr_match.dport))
+				continue;
+
+			// Check TCP flags match
+			if ((r->match_field_flags & MATCH_TCP_FLAGS) && ((pkt_hdrs->hdr_match.tcp_flags & r->hdr_match.tcp_flags) != r->hdr_match.tcp_flags))
+				continue;
+
+			// Check rate limit
+            if (r->match_field_flags & MATCH_RATE_LIMIT) {
+                struct rate_limiter *c = bpf_map_lookup_elem(&limiters_map, &r->rule_id);
+                if (c) {
+                    __u64 now, delta;
+                    now = bpf_ktime_get_ns();
+                    c->tokens += (now - c->last_update) * c->rate_limit;
+                    c->last_update = now;
+                    if (c->tokens > c->max_tokens)
+                        c->tokens = c->max_tokens;
+                    if (r->exp_match.limit_type == LIMIT_PPS)
+                        delta = c->tokens - 1;
+                    else
+                        delta = c->tokens - pkt_len;
+                    if (delta >= 0) {
+                        c->tokens = delta;
+                        bpf_map_update_elem(&limiters_map, &r->rule_id, c, BPF_EXIST);
+                    } else {
+                        bpf_map_update_elem(&limiters_map, &r->rule_id, c, BPF_EXIST);
+                        continue;
+                    }
+                } else {
+                    continue;
                 }
+            }
+
+            switch (r->rule_action.action) {
+            case RL_ABORTED:
+            case RL_DROP:
+            case RL_ACCEPT:
+            case RL_TX:
+            case RL_REDIRECT:
+                return r->rule_action.action;
+            case RL_JUMP:
+                chain_id = r->rule_action.chain_id;
+                goto next_chain; 
+            default:
+                break;
             }
         }
         return RL_ACCEPT;
