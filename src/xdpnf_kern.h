@@ -95,7 +95,7 @@ static __always_inline int parse_ethhdr(struct hdr_cursor *nh, void *data_end,
 	__u16 h_proto;
 	int i;
 
-	if (eth + 1 > data_end)
+	if (unlikely(eth + 1 > data_end))
 		return -1;
 
 	nh->pos = eth + 1;
@@ -183,13 +183,13 @@ static __always_inline int parse_iphdr(struct hdr_cursor *nh,
 	struct iphdr *iph = nh->pos;
 	int hdrsize;
 
-	if (iph + 1 > data_end)
+	if (unlikely(iph + 1 > data_end))
 		return -1;
 
 	hdrsize = iph->ihl * 4;
 
 	/* Variable-length IPv4 header, need to use byte-based arithmetic */
-	if (nh->pos + hdrsize > data_end)
+	if (unlikely(nh->pos + hdrsize > data_end))
 		return -1;
 
 	nh->pos += hdrsize;
@@ -204,7 +204,7 @@ static __always_inline int parse_icmp6hdr(struct hdr_cursor *nh,
 {
 	struct icmp6hdr *icmp6h = nh->pos;
 
-	if (icmp6h + 1 > data_end)
+	if (unlikely(icmp6h + 1 > data_end))
 		return -1;
 
 	nh->pos   = icmp6h + 1;
@@ -219,7 +219,7 @@ static __always_inline int parse_icmphdr(struct hdr_cursor *nh,
 {
 	struct icmphdr *icmph = nh->pos;
 
-	if (icmph + 1 > data_end)
+	if (unlikely(icmph + 1 > data_end))
 		return -1;
 
 	nh->pos  = icmph + 1;
@@ -234,7 +234,7 @@ static __always_inline int parse_icmphdr_common(struct hdr_cursor *nh,
 {
 	struct icmphdr_common *h = nh->pos;
 
-	if (h + 1 > data_end)
+	if (unlikely(h + 1 > data_end))
 		return -1;
 
 	nh->pos  = h + 1;
@@ -253,14 +253,14 @@ static __always_inline int parse_udphdr(struct hdr_cursor *nh,
 	int len;
 	struct udphdr *h = nh->pos;
 
-	if (h + 1 > data_end)
+	if (unlikely(h + 1 > data_end))
 		return -1;
 
 	nh->pos  = h + 1;
 	*udphdr = h;
 
 	len = bpf_ntohs(h->len) - sizeof(struct udphdr);
-	if (len < 0)
+	if (unlikely(len < 0))
 		return -1;
 
 	return len;
@@ -276,11 +276,11 @@ static __always_inline int parse_tcphdr(struct hdr_cursor *nh,
 	int len;
 	struct tcphdr *h = nh->pos;
 
-	if (h + 1 > data_end)
+	if (unlikely(h + 1 > data_end))
 		return -1;
 
 	len = h->doff * 4;
-	if ((void *) h + len > data_end)
+	if (unlikely((void *) h + len > data_end))
 		return -1;
 
 	nh->pos  = h + 1;
@@ -289,49 +289,72 @@ static __always_inline int parse_tcphdr(struct hdr_cursor *nh,
 	return len;
 }
 
-static __always_inline int is_ipv4_match(__be32 *addr, struct ipv4_addr *match_rule) {
-    __be32 masked_ip = *addr & match_rule->mask;
-    __be32 masked_rule_addr = match_rule->addr & match_rule->mask;
+// static __always_inline int is_ipv4_match(__u32 src_ip, __u32 net_ip, __u32 mask)
+// {
+//     return !((src_ip ^ net_ip) & mask);
+// }
 
-    return masked_ip == masked_rule_addr;
-}
-
-static __always_inline int is_ipv6_match(struct ipv6_addr addr, struct ipv6_addr match_rule) {
-    for (int i = 0; i < IPV6_ADDR_LEN; i++) {
-        if ((addr.addr[i] & match_rule.mask[i]) != (addr.addr[i] & match_rule.mask[i])) {
-            return FALSE;
-        }
-    }
-    return TRUE;
-}
+// static __always_inline int is_ipv6_match(struct ipv6_addr *org, struct ipv6_addr *match_rule) {
+//     for (int i = 0; i < IPV6_ADDR_LEN; i++) {
+//         if (!((org->addr[i]^match_rule->addr[i]) & match_rule->mask[i])) 
+//             return FALSE;
+//     }
+//     return TRUE;
+// }
 
 static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, __u32 chain_id) {
     for (int depth = 0; depth < MAX_CHAIN_DEPTH; depth++) {
-        struct chain *c = bpf_map_lookup_elem(&chains_map, &chain_id);
+        struct chain *c= bpf_map_lookup_elem(&chains_map, &chain_id);
         if (!c)
             return RL_ABORTED;
 
         for (__u16 i = 0; i < MAX_RULES_PER_CHAIN; i++) {
 			struct rule *r = &c->rule_list[i];
+
 			if (r->match_field_flags == 0)
 				break;
 			
-			__u32 match_hdr_fields = pkt_hdrs->match_field_flags & r->match_field_flags;
+			__u32 match_hdr_fields;
+			match_hdr_fields = pkt_hdrs->match_field_flags & r->match_field_flags;
 
 			// Check protocol match
 			if ((match_hdr_fields & MATCH_PROTOCOL) != (r->match_field_flags & MATCH_PROTOCOL))
 				continue;
 			
 			// Check IPv4 addr match
-			if ((r->match_field_flags & MATCH_SRC_IPV4_ADDR) && !is_ipv4_match(&(pkt_hdrs->hdr_match.src_ip.ipv4.addr), &(r->hdr_match.src_ip.ipv4)))
-				continue;
-			if ((r->match_field_flags & MATCH_DST_IPV4_ADDR) && !is_ipv4_match(&(pkt_hdrs->hdr_match.dst_ip.ipv4.addr), &(r->hdr_match.dst_ip.ipv4)))
-				continue;
+			
+			if ((r->match_field_flags & (MATCH_SRC_ADDR|MATCH_IPV4))) {
+				__u32 check = ((pkt_hdrs->hdr_match.src_ip.ipv4.addr ^ r->hdr_match.src_ip.ipv4.addr) & r->hdr_match.src_ip.ipv4.mask);
+				if (check)
+					continue;
+			}
+			if ((r->match_field_flags & (MATCH_DST_ADDR|MATCH_IPV4))) {
+				__u32 check = ((pkt_hdrs->hdr_match.dst_ip.ipv4.addr ^ r->hdr_match.dst_ip.ipv4.addr) & r->hdr_match.dst_ip.ipv4.mask);
+				if (check)
+					continue;
+			}
 
 			// Check IPv6 addr match
-			if ((r->match_field_flags & MATCH_SRC_IPV6_ADDR) && !is_ipv6_match(pkt_hdrs->hdr_match.src_ip.ipv6, r->hdr_match.src_ip.ipv6))
-				continue;
-			if ((r->match_field_flags & MATCH_DST_IPV6_ADDR) && !is_ipv6_match(pkt_hdrs->hdr_match.dst_ip.ipv6, r->hdr_match.dst_ip.ipv6))
+			if (r->match_field_flags & (MATCH_SRC_ADDR|MATCH_IPV6)) {
+				__u8 check;
+				for (int i = 0; i < IPV6_ADDR_LEN; i++) {
+					if (!((pkt_hdrs->hdr_match.src_ip.ipv6.addr[i]^r->hdr_match.src_ip.ipv6.addr[i]) & r->hdr_match.src_ip.ipv6.mask[i])) 
+						check = FALSE;
+						break;
+				}
+				if (check)
+					continue;
+    }
+			if ((r->match_field_flags & (MATCH_DST_ADDR|MATCH_IPV6))) {
+				__u8 check;
+				for (int i = 0; i < IPV6_ADDR_LEN; i++) {
+					if (!((pkt_hdrs->hdr_match.dst_ip.ipv6.addr[i]^r->hdr_match.dst_ip.ipv6.addr[i]) & r->hdr_match.dst_ip.ipv6.mask[i])) 
+						check = FALSE;
+						break;
+				}
+				if (check)
+					continue;
+			}
 				continue;
 
 			// Check ICMP match
@@ -352,20 +375,20 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 
 			// Check rate limit
             if (r->match_field_flags & MATCH_RATE_LIMIT) {
-                struct rate_limiter *c = bpf_map_lookup_elem(&limiters_map, &r->rule_id);
-                if (c) {
+                struct rate_limiter *rl = bpf_map_lookup_elem(&limiters_map, &r->rule_id);
+                if (rl) {
                     __u64 now, delta;
                     now = bpf_ktime_get_ns();
-                    c->tokens += (now - c->last_update) * c->rate_limit;
-                    c->last_update = now;
-                    if (c->tokens > c->max_tokens)
-                        c->tokens = c->max_tokens;
+                    rl->tokens += (now - rl->last_update) * rl->rate_limit;
+                    rl->last_update = now;
+                    if (rl->tokens > rl->max_tokens)
+                        rl->tokens = rl->max_tokens;
                     if (r->exp_match.limit_type == LIMIT_PPS)
-                        delta = c->tokens - 1;
+                        delta = rl->tokens - 1;
                     else
-                        delta = c->tokens - pkt_len;
+                        delta = rl->tokens - pkt_len;
                     if (delta >= 0) {
-                        c->tokens = delta;
+                        rl->tokens = delta;
                         bpf_map_update_elem(&limiters_map, &r->rule_id, c, BPF_EXIST);
                     } else {
                         bpf_map_update_elem(&limiters_map, &r->rule_id, c, BPF_EXIST);

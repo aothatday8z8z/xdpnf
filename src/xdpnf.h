@@ -1,8 +1,6 @@
 #pragma once
 
 #include <linux/types.h>
-#include <bpf_helpers.h>
-#include <xdp/xdp_helpers.h>
 
 #define MAX_LIMITERS 255
 // #define MAX_CPUS 256
@@ -24,7 +22,6 @@
 #define NANO_TO_SEC 1000000000
 
 #define IPV6_ADDR_LEN 16
-#define IPV4_ADDR_LEN 4
 
 #define TRUE 1
 #define FALSE 0
@@ -34,10 +31,9 @@
 // Match fields flags
 #define MATCH_IPV4             (1<<0)
 #define MATCH_IPV6             (1<<1)
-#define MATCH_SRC_IPV4_ADDR    (1<<2)
-#define MATCH_DST_IPV4_ADDR    (1<<3)
-#define MATCH_SRC_IPV6_ADDR    (1<<4)
-#define MATCH_DST_IPV6_ADDR    (1<<5)
+#define MATCH_SRC_ADDR         (1<<2)
+#define MATCH_DST_ADDR         (1<<3)
+
 #define MATCH_TCP              (1<<6)
 #define MATCH_UDP              (1<<7)
 #define MATCH_ICMP             (1<<8)
@@ -89,14 +85,6 @@ struct ipv6_addr {
     __u8 mask[IPV6_ADDR_LEN];    
 };
 
-// optimized union for ipv4 and ipv6 addresses
-union ip_addr{
-    struct ipv4_addr ipv4;
-    struct ipv6_addr ipv6;
-};
-
-
-
 enum rule_action {
     RL_ABORTED = 0,            // Abort processing
 	RL_DROP = 1,             // Drop the packet
@@ -108,8 +96,16 @@ enum rule_action {
 };
 
 struct header_match {
-    union ip_addr src_ip;
-    union ip_addr dst_ip;
+    union {
+        struct ipv4_addr ipv4;
+        struct ipv6_addr ipv6;
+    } src_ip;
+
+    union {
+        struct ipv4_addr ipv4;
+        struct ipv6_addr ipv6;
+    } dst_ip;
+
     // __s8 tos;
     __u16 sport;
     __u16 dport;

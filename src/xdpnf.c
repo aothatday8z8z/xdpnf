@@ -11,6 +11,7 @@
 #include <bpf/libbpf.h>
 #include <xdp/libxdp.h>
 #include <arpa/inet.h>
+#include <linux/tcp.h>
 
 #include <linux/if_ether.h>
 
@@ -24,14 +25,15 @@
 #define PROG_KERN_NAME "xdpnf_kern"
 
 
-#define ERR_INVALID_L3_PROTO      (1<<0)
-#define ERR_INVALID_L4_PROTO      (1<<1) 
-#define ERR_INVALID_IP_ADDR       (1<<2)
-#define ERR_INVALID_PORT          (1<<3)
-#define ERR_INVALID_TCP_FLAGS     (1<<4)
-#define ERR_INVALID_ICMP_TYPE     (1<<5)
-#define ERR_INVALID_ICMP_CODE     (1<<6)
-#define ERR_INVALID_RATE_LIMIT    (1<<7)
+#define PARSE_OK 0
+#define PARSE_ERR_INVALID_L3_PROTO      (1<<0)
+#define PARSE_ERR_INVALID_L4_PROTO      (1<<1) 
+#define PARSE_ERR_INVALID_IP_ADDR       (1<<2)
+#define PARSE_ERR_INVALID_PORT          (1<<3)
+#define PARSE_ERR_INVALID_TCP_FLAGS     (1<<4)
+#define PARSE_ERR_INVALID_ICMP_TYPE     (1<<5)
+#define PARSE_ERR_INVALID_ICMP_CODE     (1<<6)
+#define PARSE_ERR_INVALID_RATE_LIMIT    (1<<7)
 
 
 static const struct loadopt {
@@ -291,9 +293,10 @@ out:
 // Để match nhiều hơn một bộ l3, l4 header sẽ cần phải tạo nhiều rule
 // Ví dụ: drop TCP và UDP ~ drop TCP + drop UDP
 
+/* return 0 if success, otherwise return error code */
 static int parse_rule(const char *rule, struct rule *r) {
-    memset(hm, 0, sizeof(*hm)); // Clear the struct
-
+	int ret = 0;
+    memset(hm, 0, sizeof(*hm));
     char rule_copy[256];
     strncpy(rule_copy, rule, sizeof(rule_copy) - 1);
     rule_copy[sizeof(rule_copy) - 1] = '\0';
@@ -312,115 +315,117 @@ static int parse_rule(const char *rule, struct rule *r) {
                 } else if (strcmp(value, "ipv6") == 0) {
                     r->match_field_flags |= MATCH_IPV6;
                 } else {
-                    return -1; 
+                    ret |= PARSE_ERR_INVALID_L3_PROTO; 
                 }
             } 
             else if (strcmp(key, "saddr") == 0) {
                 char *cidr = strchr(value, '/');
+				int prefix = 32; // Default prefix length
                 if (cidr) {
                     *cidr = '\0';
                     int prefix = atoi(cidr + 1); 
-                    if (hm->l3_proto == 0) {
-                        if (inet_pton(AF_INET, value, &hm->src_ip.ipv4) != 1) {
-                            return -1; //
-                        }
-                        // Chuyển src_ip sang network byte order
-                        hm->src_ip.ipv4 = htonl(hm->src_ip.ipv4);
-                        hm->src_mask = cidr_to_mask(prefix); // Tính subnet mask
-                    } else if (hm->l3_proto == 1) {
-                        if (inet_pton(AF_INET6, value, &hm->src_ip.ipv6) != 1) {
-                            return PARSE_ERROR_INVALID_IP; // IP không hợp lệ
-                        }
-                    }
                 } 
-				else {
-                    // Trường hợp không có CIDR
-                    if (hm->l3_proto == 0) {
-                        if (inet_pton(AF_INET, value, &hm->src_ip.ipv4) != 1) {
-                            return PARSE_ERROR_INVALID_IP; // IP không hợp lệ
-                        }
-                        // Chuyển src_ip sang network byte order
-                        hm->src_ip.ipv4 = htonl(hm->src_ip.ipv4);
-                    } else if (hm->l3_proto == 1) {
-                        if (inet_pton(AF_INET6, value, &hm->src_ip.ipv6) != 1) {
-                            return PARSE_ERROR_INVALID_IP; // IP không hợp lệ
-                        }
-                    }
-                }
+
+				if (r->match_field_flags & MATCH_IPV4) {
+					if (inet_pton(AF_INET, value, &r->hdr_match.src_ip.ipv4.addr) != 1) {
+						ret |= PARSE_ERR_INVALID_IP_ADDR;
+					}
+					// hm->src_ip.ipv4 = htonl(hm->src_ip.ipv4);
+					r->hdr_match.src_ip.ipv4.mask = htonl((0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF);
+				} 
+				else if (r->match_field_flags & MATCH_IPV6) {
+					if (inet_pton(AF_INET6, value, &r->hdr_match.src_ip.ipv6) != 1) {
+						ret |= PARSE_ERR_INVALID_IP_ADDR; 
+					}
+				}
             } 
 			else if (strcmp(key, "dst_ip") == 0) {
                 char *cidr = strchr(value, '/');
+				int prefix = 32; // Default prefix length
                 if (cidr) {
-                    *cidr = '\0'; // Tách CIDR
-                    int prefix = atoi(cidr + 1); // Lấy prefix từ CIDR
-                    if (hm->l3_proto == 0) {
-                        if (inet_pton(AF_INET, value, &hm->dst_ip.ipv4) != 1) {
-                            return PARSE_ERROR_INVALID_IP; // IP không hợp lệ
-                        }
-                        // Chuyển dst_ip sang network byte order
-                        hm->dst_ip.ipv4 = htonl(hm->dst_ip.ipv4);
-                        hm->dst_mask = cidr_to_mask(prefix); // Tính subnet mask
-                    } else if (hm->l3_proto == 1) {
-                        if (inet_pton(AF_INET6, value, &hm->dst_ip.ipv6) != 1) {
-                            return PARSE_ERROR_INVALID_IP; // IP không hợp lệ
-                        }
-                    }
+                    *cidr = '\0';
+                    int prefix = atoi(cidr + 1); 
                 } 
-				else {
-                    // Trường hợp không có CIDR
-                    if (hm->l3_proto == 0) {
-                        if (inet_pton(AF_INET, value, &hm->dst_ip.ipv4) != 1) {
-                            return PARSE_ERROR_INVALID_IP; // IP không hợp lệ
-                        }
-                        // Chuyển dst_ip sang network byte order
-                        hm->dst_ip.ipv4 = htonl(hm->dst_ip.ipv4);
-                    } else if (hm->l3_proto == 1) {
-                        if (inet_pton(AF_INET6, value, &hm->dst_ip.ipv6) != 1) {
-                            return PARSE_ERROR_INVALID_IP; // IP không hợp lệ
-                        }
-                    }
-                }
+
+				if (r->match_field_flags & MATCH_IPV4) {
+					if (inet_pton(AF_INET, value, &r->hdr_match.dst_ip.ipv4.addr) != 1) {
+						ret |= PARSE_ERR_INVALID_IP_ADDR;
+					}
+					// hm->src_ip.ipv4 = htonl(hm->src_ip.ipv4);
+					r->hdr_match.dst_ip.ipv4.mask = htonl((0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF);
+				} 
+				else if (r->match_field_flags & MATCH_IPV6) {
+					if (inet_pton(AF_INET6, value, &r->hdr_match.dst_ip.ipv6) != 1) {
+						ret |= PARSE_ERR_INVALID_IP_ADDR; 
+					}
+				}
 			}
   			else if (strcmp(key, "l4_proto") == 0) {
                 if (strcmp(value, "udp") == 0) {
-                    hm->l4_proto = 0;
+					r->match_field_flags |= MATCH_UDP;
                 } else if (strcmp(value, "tcp") == 0) {
-                    hm->l4_proto = 1;
+					r->match_field_flags |= MATCH_TCP;
                 } else if (strcmp(value, "icmp") == 0) {
-                    hm->l4_proto = 2;
+                    r->match_field_flags |= MATCH_ICMP;
                 } else if (strcmp(value, "icmpv6") == 0) {
-                    hm->l4_proto = 3;
+                    r->match_field_flags |= MATCH_ICMPV6;
                 } else {
-                    return PARSE_ERROR_INVALID_VALUE; // Giá trị không hợp lệ cho l4_proto
+                	ret |= PARSE_ERR_INVALID_L4_PROTO; 
                 }
-            } else if (strcmp(key, "sport") == 0) {
-                hm->sport = htons((uint16_t)atoi(value)); // Chuyển port sang network byte order
-            } else if (strcmp(key, "dport") == 0) {
-                hm->dport = htons((uint16_t)atoi(value)); // Chuyển port sang network byte order
-            } else if (strcmp(key, "tcp_flags") == 0) {
-                // Xử lý các cờ TCP
-                if (strstr(value, "syn")) hm->tcp_flags |= TCP_FLAG_SYN;
-                if (strstr(value, "ack")) hm->tcp_flags |= TCP_FLAG_ACK;
-                if (strstr(value, "fin")) hm->tcp_flags |= TCP_FLAG_FIN;
-                if (strstr(value, "urg")) hm->tcp_flags |= TCP_FLAG_URG;
-                if (strstr(value, "psh")) hm->tcp_flags |= TCP_FLAG_PSH;
-                if (strstr(value, "rst")) hm->tcp_flags |= TCP_FLAG_RST;
-                if (strstr(value, "ece")) hm->tcp_flags |= TCP_FLAG_ECE;
-                if (strstr(value, "cwr")) hm->tcp_flags |= TCP_FLAG_CWR;
-            } else if (strcmp(key, "icmp_type") == 0) {
-                hm->icmp_type = (uint8_t)atoi(value);
-            } else if (strcmp(key, "icmp_code") == 0) {
-                hm->icmp_code = (uint8_t)atoi(value);
-            } else {
-                return PARSE_ERROR_INVALID_KEY; // Key không hợp lệ
-            }
-        } else {
-            return PARSE_ERROR_INVALID_KEY; // Key không hợp lệ
-        }
+            } 
+			else if (strcmp(key, "sport") == 0) {
+				int port = atoi(value);
+				if (port < 0 || port > 65535) {
+					ret |= PARSE_ERR_INVALID_PORT;
+				} else {
+					r->hdr_match.sport = htons((uint16_t)port);
+				}
+			} 
+			else if (strcmp(key, "dport") == 0) {
+				int port = atoi(value);
+				if (port < 0 || port > 65535) {
+					ret |= PARSE_ERR_INVALID_PORT;
+				} else {
+					r->hdr_match.dport = htons((uint16_t)port);
+				}
+			} 
+			else if (strcmp(key, "tcp_flags") == 0) {
+				// Xử lý các cờ TCP
+				char *flag_token = strtok(value, "|");
+				while (flag_token) {
+					if (strcmp(flag_token, "syn") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_SYN;
+					else if (strcmp(flag_token, "ack") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_ACK;
+					else if (strcmp(flag_token, "fin") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_FIN;
+					else if (strcmp(flag_token, "urg") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_URG;
+					else if (strcmp(flag_token, "psh") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_PSH;
+					else if (strcmp(flag_token, "rst") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_RST;
+					else if (strcmp(flag_token, "ece") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_ECE;
+					else if (strcmp(flag_token, "cwr") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_CWR;
+					else ret |= PARSE_ERR_INVALID_TCP_FLAGS;
+					flag_token = strtok(NULL, "|");
+				}
+			} 
+			else if (strcmp(key, "icmp_type") == 0) {
+				int icmp_type = atoi(value);
+				if (icmp_type < 0 || icmp_type > 255) {
+					ret |= PARSE_ERR_INVALID_ICMP_TYPE;
+				} else {
+					r->hdr_match.icmp_type = (uint8_t)icmp_type;
+				}
+			} 
+			else if (strcmp(key, "icmp_code") == 0) {
+				int icmp_code = atoi(value);
+				if (icmp_code < 0 || icmp_code > 255) {
+					ret |= PARSE_ERR_INVALID_ICMP_CODE;
+				} else {
+					r->hdr_match.icmp_code = (uint8_t)icmp_code;
+				}
+			} 
+        } 
         token = strtok(NULL, ",");
     }
 
-    return PARSE_OK; // Thành công
+    return ret;
 }
 
 static struct prog_option append_options[] = {

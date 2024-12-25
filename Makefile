@@ -38,7 +38,9 @@ LIBXDPOBJS = $(LIBXDPDIR)/sharedobjs/xsk.o $(LIBXDPDIR)/sharedobjs/libxdp.o
 
 # Flags
 LDFLAGS += -lconfig -lelf -lz
-INCS = -I $(LIBBPFSRC) -I /usr/include -I /usr/local/include -I modules/xdp-tools/headers/ -I $(UTILSDIR)
+INCS_KERN = -I $(LIBBPFSRC) -I /usr/include -I /usr/local/include -I modules/xdp-tools/headers/ -I $(UTILSDIR)
+INCS_USER = -I $(LIBBPFSRC) -I /usr/include -I /usr/local/include  -I $(UTILSDIR)
+
 
 # Targets
 .PHONY: all clean install libs utils xdpnf xdpnf_kern
@@ -48,12 +50,14 @@ all: xdpnf xdpnf_kern utils
 # User space application
 xdpnf: utils libs $(UTIL_OBJECTS)
 	mkdir -p $(BUILDDIR)
-	$(CC) $(LDFLAGS) $(INCS) -o $(XDPNFOUT) $(LIBBPFOBJS) $(LIBXDPOBJS) $(XDPNFSRC) $(UTIL_OBJECTS)
+	$(CC) $(LDFLAGS) $(INCS_USER) -o $(XDPNFOUT) $(LIBBPFOBJS) $(LIBXDPOBJS) $(XDPNFSRC) $(UTIL_OBJECTS)
 
 # XDP kernel program
+# Our environment's kernel is small than 5.17, so we can't use bpf_loop helper
+# We use O3 to unroll loop then avoid the verifier to fail
 xdpnf_kern: $(XDPPROGSRC)
 	mkdir -p $(BUILDDIR)
-	$(CC) $(INCS) -D__BPF__ -D__BPF_TRACING__ -Wno-unused-value \
+	$(CC) $(INCS_KERN) -D__BPF__ -D__BPF_TRACING__ -Wno-unused-value \
 	    -Wno-pointer-sign -Wno-compare-distinct-pointer-types -O3 -emit-llvm -c -g \
 	    -o $(BUILDDIR)/xdpnf_kern.ll $<
 	$(LLC) -march=bpf -filetype=obj -o $(XDPPROGOBJ) $(BUILDDIR)/xdpnf_kern.ll
