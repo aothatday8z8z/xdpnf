@@ -11,7 +11,6 @@
 #include <linux/if_link.h> /* XDP_FLAGS_* depend on kernel-headers installed */
 #include <linux/if_xdp.h>
 #include <arpa/inet.h>
-#include <linux/tcp.h>
 
 #include "params.h"
 #include "logging.h"
@@ -695,13 +694,13 @@ int parse_cmdline_args(int argc, char **argv, struct prog_option *poptions,
 		case 'v':
 			increase_log_level();
 			break;
-		case VERSION_SHORT_OPT:
-			printf("%s version %s using libbpf version %s\n",
-			       prog,
-			       TOOLS_VERSION,
-			       get_libbpf_version());
-			err = EXIT_FAILURE;
-			goto out;
+		// case VERSION_SHORT_OPT:
+		// 	printf("%s version %s using libbpf version %s\n",
+		// 	       prog,
+		// 	       TOOLS_VERSION,
+		// 	       get_libbpf_version());
+		// 	err = EXIT_FAILURE;
+		// 	goto out;
 		default:
 			if (set_opt(cfg, poptions, opt, optarg)) {
 				usage(prog, doc, poptions, full_help);

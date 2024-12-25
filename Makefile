@@ -38,8 +38,8 @@ LIBXDPOBJS = $(LIBXDPDIR)/sharedobjs/xsk.o $(LIBXDPDIR)/sharedobjs/libxdp.o
 
 # Flags
 LDFLAGS += -lconfig -lelf -lz
-INCS_KERN = -I $(LIBBPFSRC) -I /usr/include -I /usr/local/include -I modules/xdp-tools/headers/ -I $(UTILSDIR)
-INCS_USER = -I $(LIBBPFSRC) -I /usr/include -I /usr/local/include  -I $(UTILSDIR)
+INCS_KERN = -I $(LIBBPFSRC)
+INCS_USER = -I /usr/include -I /usr/local/include -I modules/xdp-tools/lib/libbpf/include/ -I $(UTILSDIR)
 
 
 # Targets
@@ -67,7 +67,7 @@ utils: $(UTIL_OBJECTS)
 
 $(BUILDDIR)/%.o: $(UTILSDIR)/%.c
 	mkdir -p $(BUILDDIR)
-	$(CC) -O2 -c $(INCS)  -o $@ $<
+	$(CC) -O2 -c $(INCS_USER)  -o $@ $<
 
 # Libraries
 libs:
@@ -83,5 +83,6 @@ clean:
 
 # Install
 install: all
-	cp $(XDPPROGOBJ) /etc/xdpnf/
+	mkdir -p /usr/local/lib/bpf/
+	cp $(XDPPROGOBJ) /usr/local/lib/bpf/
 	cp $(XDPNFOUT) /usr/bin/

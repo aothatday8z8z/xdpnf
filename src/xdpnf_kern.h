@@ -14,12 +14,14 @@
 #include "xdpnf.h"
 
 
+// TODO: split into default_chain and sub_chains map
 struct 
 {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, MAX_CHAINS);
     __type(key, __u32);
     __type(value, struct chain);
+	__uint(pinning, LIBBPF_PIN_BY_NAME);
 } chains_map SEC(".maps");
 
 struct 
@@ -28,6 +30,7 @@ struct
     __uint(max_entries, MAX_LIMITERS);
     __type(key, __u32);
     __type(value, struct rate_limiter);
+	__uint(pinning, LIBBPF_PIN_BY_NAME);
 } limiters_map SEC(".maps");
 
 /* Header cursor to keep track of current parsing position */
@@ -375,7 +378,7 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 
 			// Check rate limit
             if (r->match_field_flags & MATCH_RATE_LIMIT) {
-                struct rate_limiter *rl = bpf_map_lookup_elem(&limiters_map, &r->rule_id);
+                struct rate_limiter *rl = bpf_map_lookup_elem(&limiters_map, &r->exp_match.limiter_id);
                 if (rl) {
                     __u64 now, delta;
                     now = bpf_ktime_get_ns();
@@ -383,15 +386,15 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
                     rl->last_update = now;
                     if (rl->tokens > rl->max_tokens)
                         rl->tokens = rl->max_tokens;
-                    if (r->exp_match.limit_type == LIMIT_PPS)
+                    if (rl->type == LIMIT_PPS)
                         delta = rl->tokens - 1;
-                    else
+                    else if (rl->type == LIMIT_BPS)
                         delta = rl->tokens - pkt_len;
                     if (delta >= 0) {
                         rl->tokens = delta;
-                        bpf_map_update_elem(&limiters_map, &r->rule_id, c, BPF_EXIST);
+                        bpf_map_update_elem(&limiters_map, &r->exp_match.limiter_id, c, BPF_ANY);
                     } else {
-                        bpf_map_update_elem(&limiters_map, &r->rule_id, c, BPF_EXIST);
+                        bpf_map_update_elem(&limiters_map, &r->exp_match.limiter_id, c, BPF_ANY);
                         continue;
                     }
                 } else {
@@ -407,7 +410,7 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
             case RL_REDIRECT:
                 return r->rule_action.action;
             case RL_JUMP:
-                chain_id = r->rule_action.chain_id;
+                chain_id = r->rule_action.goto_id;
                 goto next_chain; 
             default:
                 break;

@@ -96,6 +96,60 @@ int double_rlimit(void)
 }
 
 
+int iterate_pinned_programs(const char *pin_root_path, program_callback cb,
+			    void *arg)
+{
+	char pin_path[PATH_MAX];
+	struct dirent *de;
+	int err = 0;
+	DIR *dr;
+
+	err = try_snprintf(pin_path, sizeof(pin_path), "%s/programs",
+			   pin_root_path);
+	if (err)
+		return err;
+
+	dr = opendir(pin_path);
+	if (!dr)
+		return -ENOENT;
+
+	while ((de = readdir(dr)) != NULL) {
+		enum xdp_attach_mode mode = XDP_MODE_UNSPEC;
+		struct xdp_program *prog = NULL;
+		struct iface iface = {};
+
+		if (!strcmp(".", de->d_name) || !strcmp("..", de->d_name))
+			continue;
+
+		iface.ifname = de->d_name;
+		iface.ifindex = if_nametoindex(iface.ifname);
+
+		err = try_snprintf(pin_path, sizeof(pin_path), "%s/programs/%s",
+				   pin_root_path, iface.ifname);
+		if (err)
+			goto out;
+
+		err = get_pinned_program(&iface, pin_root_path, &mode, &prog);
+		if (err == -ENOENT || err == -ENODEV) {
+			err = rmdir(pin_path);
+			if (err)
+				goto out;
+			continue;
+		} else if (err) {
+			goto out;
+		}
+
+		err = cb(&iface, prog, mode, arg);
+		xdp_program__close(prog);
+		if (err)
+			goto out;
+	}
+
+out:
+	closedir(dr);
+	return err;
+}
+
 int find_bpf_file(char *buf, size_t buf_size, const char *progname)
 {
 	static char *bpf_obj_paths[] = {

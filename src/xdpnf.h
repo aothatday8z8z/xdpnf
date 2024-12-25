@@ -2,7 +2,7 @@
 
 #include <linux/types.h>
 
-#define MAX_LIMITERS 255
+#define MAX_LIMITERS 1000
 // #define MAX_CPUS 256
 // #define MAX_PCKT_LENGTH 65535
 #define RULE_SHIFT 11
@@ -10,14 +10,14 @@
 #define MAX_RULES_PER_CHAIN 127
 #define MAX_CHAINS 32
 
-#define CREATE_RULE_ID(chain_id, rule_index) \
-    ((((chain_id) & MAX_CHAINS) << RULE_SHIFT) | ((rule_index) & MAX_RULES_PER_CHAIN))
+// #define CREATE_RULE_ID(chain_id, rule_index) \
+//     ((((chain_id) & MAX_CHAINS) << RULE_SHIFT) | ((rule_index) & MAX_RULES_PER_CHAIN))
 
-#define DECODE_CHAIN_ID(rule_id) \
-    (((rule_id) >> RULE_SHIFT) & MAX_CHAINS)
+// #define DECODE_CHAIN_ID(rule_id) \
+//     (((rule_id) >> RULE_SHIFT) & MAX_CHAINS)
 
-#define DECODE_RULE_INDEX(rule_id) \
-    ((rule_id) & MAX_RULES_PER_CHAIN)
+// #define DECODE_RULE_INDEX(rule_id) \
+//     ((rule_id) & MAX_RULES_PER_CHAIN)
 
 #define NANO_TO_SEC 1000000000
 
@@ -106,11 +106,10 @@ struct header_match {
         struct ipv6_addr ipv6;
     } dst_ip;
 
+    __u32 tcp_flags;
     // __s8 tos;
     __u16 sport;
     __u16 dport;
-
-    __u8 tcp_flags;
 
     __u8 icmp_type;
     __u8 icmp_code;
@@ -123,16 +122,18 @@ struct rate_limiter {
     __u64 rate_limit;
     __u64 max_tokens; // = rate_limit * burst_size        
     __u64 tokens;
+    enum limit_type type;
+    __u8 enabled;
 };
 
 struct explicit_match {
     // TODO: add conntrack match
-    enum limit_type limit_type;
+    __u16 limiter_id; 
 }; 
 
 struct action {
     enum rule_action action;
-    __u8 chain_id;
+    __u8 goto_id;
 };
 
 
@@ -143,13 +144,11 @@ struct rule
     struct action rule_action;
     __u64 hit_count;
     __u32 match_field_flags;
-    __u16 rule_id; // unique id for each rule in kernel
 };
 
 struct chain {
     struct rule rule_list[MAX_RULES_PER_CHAIN];
     char name[32];
     __u16 num_rules;
-    __u8 chain_id;
 } __attribute__((__aligned__(8)));
 
