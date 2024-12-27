@@ -17,7 +17,7 @@
 // TODO: split into default_chain and sub_chains map
 struct 
 {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, MAX_CHAINS);
     __type(key, __u32);
     __type(value, struct chain);
@@ -26,7 +26,7 @@ struct
 
 struct 
 {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, MAX_LIMITERS);
     __type(key, __u32);
     __type(value, struct rate_limiter);
@@ -292,18 +292,6 @@ static __always_inline int parse_tcphdr(struct hdr_cursor *nh,
 	return len;
 }
 
-// static __always_inline int is_ipv4_match(__u32 src_ip, __u32 net_ip, __u32 mask)
-// {
-//     return !((src_ip ^ net_ip) & mask);
-// }
-
-// static __always_inline int is_ipv6_match(struct ipv6_addr *org, struct ipv6_addr *match_rule) {
-//     for (int i = 0; i < IPV6_ADDR_LEN; i++) {
-//         if (!((org->addr[i]^match_rule->addr[i]) & match_rule->mask[i])) 
-//             return FALSE;
-//     }
-//     return TRUE;
-// }
 
 static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, __u32 chain_id) {
     for (int depth = 0; depth < MAX_CHAIN_DEPTH; depth++) {
@@ -325,7 +313,6 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 				continue;
 			
 			// Check IPv4 addr match
-			
 			if ((r->match_field_flags & (MATCH_SRC_ADDR|MATCH_IPV4))) {
 				__u32 check = ((pkt_hdrs->hdr_match.src_ip.ipv4.addr ^ r->hdr_match.src_ip.ipv4.addr) & r->hdr_match.src_ip.ipv4.mask);
 				if (check)
@@ -347,7 +334,8 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 				}
 				if (check)
 					continue;
-    }
+		    }
+			
 			if ((r->match_field_flags & (MATCH_DST_ADDR|MATCH_IPV6))) {
 				__u8 check;
 				for (int i = 0; i < IPV6_ADDR_LEN; i++) {
@@ -358,7 +346,6 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 				if (check)
 					continue;
 			}
-				continue;
 
 			// Check ICMP match
 			if ((r->match_field_flags & MATCH_ICMP_CODE) && (pkt_hdrs->hdr_match.icmp_code != r->hdr_match.icmp_code))
@@ -401,6 +388,7 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
                     continue;
                 }
             }
+			r->hit_count++;
 
             switch (r->rule_action.action) {
             case RL_ABORTED:

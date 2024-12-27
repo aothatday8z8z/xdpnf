@@ -9,6 +9,7 @@
 #define CHAIN_SHIFT 5
 #define MAX_RULES_PER_CHAIN 127
 #define MAX_CHAINS 32
+#define CHAIN_NAME_LEN 32
 
 // #define CREATE_RULE_ID(chain_id, rule_index) \
 //     ((((chain_id) & MAX_CHAINS) << RULE_SHIFT) | ((rule_index) & MAX_RULES_PER_CHAIN))
@@ -148,7 +149,7 @@ struct rule
 
 struct chain {
     struct rule rule_list[MAX_RULES_PER_CHAIN];
-    char name[32];
+    char name[CHAIN_NAME_LEN];
     __u16 num_rules;
 } __attribute__((__aligned__(8)));
 
