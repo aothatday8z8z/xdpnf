@@ -7,8 +7,9 @@
 // #define MAX_PCKT_LENGTH 65535
 #define RULE_SHIFT 11
 #define CHAIN_SHIFT 5
-#define MAX_RULES_PER_CHAIN 127
+#define MAX_RULES_PER_CHAIN 300
 #define MAX_CHAINS 32
+#define MAX_STATS MAX_RULES_PER_CHAIN*MAX_CHAINS
 #define CHAIN_NAME_LEN 32
 
 // #define CREATE_RULE_ID(chain_id, rule_index) \
@@ -21,6 +22,10 @@
 //     ((rule_id) & MAX_RULES_PER_CHAIN)
 
 #define NANO_TO_SEC 1000000000
+#define KBYTE_TO_BYTE 1024
+#define MBYTE_TO_BYTE 1048576
+#define GBYTE_TO_BYTE 1073741824
+#define TBYTE_TO_BYTE 1099511627776
 
 #define IPV6_ADDR_LEN 16
 
@@ -121,7 +126,7 @@ struct header_match {
 struct rate_limiter {
     __u64 last_update; 
     __u64 rate_limit;
-    __u64 max_tokens; // = rate_limit * burst_size        
+    __u64 bucket_size; // = rate_limit * burst_size        
     __u64 tokens;
     enum limit_type type;
     __u8 enabled;
@@ -140,16 +145,22 @@ struct action {
 
 struct rule
 {
+    __u32 stats_id;
+    __u32 match_field_flags;
     struct header_match hdr_match;
     struct explicit_match exp_match;
     struct action rule_action;
-    __u64 hit_count;
-    __u32 match_field_flags;
 };
 
+// TODO: redesign chain structure 
 struct chain {
     struct rule rule_list[MAX_RULES_PER_CHAIN];
     char name[CHAIN_NAME_LEN];
     __u16 num_rules;
 } __attribute__((__aligned__(8)));
+
+struct rule_stats {
+    __u64 bytes;
+    __u64 packets;
+};
 

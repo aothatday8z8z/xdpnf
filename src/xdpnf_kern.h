@@ -33,6 +33,16 @@ struct
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 } limiters_map SEC(".maps");
 
+struct 
+{
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, MAX_STATS);
+	__type(key, __u32);
+	__type(value, struct rule_stats);
+	__uint(pinning, LIBBPF_PIN_BY_NAME);
+} stats_map SEC(".maps");
+
+
 /* Header cursor to keep track of current parsing position */
 struct hdr_cursor {
 	void *pos;
@@ -299,6 +309,7 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
         if (!c)
             return RL_ABORTED;
 
+		bpf_printk("Processing chain %d\n", chain_id);
         for (__u16 i = 0; i < MAX_RULES_PER_CHAIN; i++) {
 			struct rule *r = &c->rule_list[i];
 
@@ -314,11 +325,13 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 			
 			// Check IPv4 addr match
 			if ((r->match_field_flags & (MATCH_SRC_ADDR|MATCH_IPV4))) {
+				bpf_printk("Matching ipv4 src addr\n");
 				__u32 check = ((pkt_hdrs->hdr_match.src_ip.ipv4.addr ^ r->hdr_match.src_ip.ipv4.addr) & r->hdr_match.src_ip.ipv4.mask);
 				if (check)
 					continue;
 			}
 			if ((r->match_field_flags & (MATCH_DST_ADDR|MATCH_IPV4))) {
+				bpf_printk("Matching ipv4 dst addr\n");
 				__u32 check = ((pkt_hdrs->hdr_match.dst_ip.ipv4.addr ^ r->hdr_match.dst_ip.ipv4.addr) & r->hdr_match.dst_ip.ipv4.mask);
 				if (check)
 					continue;
@@ -326,6 +339,7 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 
 			// Check IPv6 addr match
 			if (r->match_field_flags & (MATCH_SRC_ADDR|MATCH_IPV6)) {
+				bpf_printk("Matching ipv6 src addr\n");
 				__u8 check;
 				for (int i = 0; i < IPV6_ADDR_LEN; i++) {
 					if (!((pkt_hdrs->hdr_match.src_ip.ipv6.addr[i]^r->hdr_match.src_ip.ipv6.addr[i]) & r->hdr_match.src_ip.ipv6.mask[i])) 
@@ -371,24 +385,28 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
                     now = bpf_ktime_get_ns();
                     rl->tokens += (now - rl->last_update) * rl->rate_limit;
                     rl->last_update = now;
-                    if (rl->tokens > rl->max_tokens)
-                        rl->tokens = rl->max_tokens;
+                    if (rl->tokens > rl->bucket_size)
+                        rl->tokens = rl->bucket_size;
                     if (rl->type == LIMIT_PPS)
                         delta = rl->tokens - 1;
                     else if (rl->type == LIMIT_BPS)
                         delta = rl->tokens - pkt_len;
-                    if (delta >= 0) {
+                    if (delta >= 0) 
                         rl->tokens = delta;
-                        bpf_map_update_elem(&limiters_map, &r->exp_match.limiter_id, c, BPF_ANY);
-                    } else {
-                        bpf_map_update_elem(&limiters_map, &r->exp_match.limiter_id, c, BPF_ANY);
-                        continue;
-                    }
+
+                    bpf_map_update_elem(&limiters_map, &r->exp_match.limiter_id, c, BPF_ANY);
                 } else {
                     continue;
                 }
             }
-			r->hit_count++;
+
+			// Update stats
+			struct rule_stats *rs = bpf_map_lookup_elem(&stats_map, &r->stats_id);
+			if (rs) {
+				rs->bytes = 0;
+				rs->packets = 0;
+				bpf_map_update_elem(&stats_map, &r->stats_id, rs, BPF_ANY);
+			}
 
             switch (r->rule_action.action) {
             case RL_ABORTED:

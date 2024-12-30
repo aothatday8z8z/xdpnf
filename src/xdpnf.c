@@ -38,6 +38,7 @@ enum {
 	TCP_DATA_OFFSET = __constant_cpu_to_be32(0xF0000000)
 };
 
+// Error codes for parsing/decode
 #define PARSE_OK 0
 #define PARSE_ERR_INVALID_L3_PROTO      (1<<0)
 #define PARSE_ERR_INVALID_L4_PROTO      (1<<1) 
@@ -60,7 +61,6 @@ struct flag_val parse_errors[] = {
 	{"invalid_rate_limit", PARSE_ERR_INVALID_RATE_LIMIT},
 	{"invalid_action", PARSE_ERR_INVALID_ACTION},
 };
-
 
 static const struct loadopt {
 	bool help;
@@ -188,14 +188,14 @@ retry:
 		int key = 0;
 		err = get_chain_by_name("default", c_map_fd, &default_chain, &key);
 		if (err) {
-			printf("Creating default chain\n");
+			pr_debug("Creating default chain\n");
 			memcpy(default_chain.name, "default", sizeof("default"));
 			default_chain.num_rules = 0;
 
 			err = bpf_map_update_elem(c_map_fd, &key, &default_chain, BPF_ANY);
 			if (err) {
 				err = -errno;
-				pr_warn("Unable to create default chain: %s\n", strerror(-err));
+				printf("Unable to create default chain: %s\n", strerror(-err));
 				goto out;
 			}
 		}
@@ -234,6 +234,9 @@ static int remove_unused_maps(const char *pin_root_path)
     if (err)
         goto out;
 
+    err = unlink_pinned_map(dir_fd, "stats_map");
+    if (err)
+        goto out;
 
     close(dir_fd);
     dir_fd = -1;
@@ -329,14 +332,14 @@ int do_unload(const void *cfg, const char *pin_root_path)
 	}
 
 	if (!opt->iface.ifindex) {
-		pr_warn("Must specify ifname or --all\n");
+		printf("Must specify ifname or --all\n");
 		err = EXIT_FAILURE;
 		goto out;
 	}
 
 	err = get_pinned_program(&opt->iface, pin_root_path, &mode, &prog);
 	if (err) {
-		pr_warn("xdpnf is not loaded on %s\n", opt->iface.ifname);
+		printf("xdpnf is not loaded on %s\n", opt->iface.ifname);
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -362,6 +365,27 @@ out:
 	return err;
 }
 
+// Return 0 if no empty key is found, otherwise return the key
+static int get_first_empty_key(int map_fd, int max_elem) {
+	int ret = 0;
+	for (int i = 1; i <= max_elem; i++) {
+		void *tmp;
+		if (bpf_map_lookup_elem(map_fd, &i, tmp) && errno == ENOENT) {
+			ret = i;
+			break;
+		}
+	}
+	return ret;
+}
+
+static void empty_rule_init(struct rule *r) {
+	r->match_field_flags = 0;
+	memset(r->hdr_match.src_ip.ipv6.addr, 0xFF, sizeof(r->hdr_match.src_ip.ipv6.addr));
+	memset(r->hdr_match.dst_ip.ipv6.addr, 0xFF, sizeof(r->hdr_match.dst_ip.ipv6.addr));
+	memset(r->hdr_match.src_ip.ipv6.mask, 0xFF, sizeof(r->hdr_match.src_ip.ipv6.mask));
+	memset(r->hdr_match.dst_ip.ipv6.mask, 0xFF, sizeof(r->hdr_match.dst_ip.ipv6.mask));
+	r->hdr_match.tcp_flags = ~0u;
+}
 
 // No case-insensitive string comparison
 static int strcmpns(const char *str1, const char *str2) {
@@ -381,18 +405,16 @@ static int strcmpns(const char *str1, const char *str2) {
 // Ví dụ: drop TCP và UDP ~ drop TCP + drop UDP
 
 /* return 0 if success, otherwise return error code */
-static int parse_rule(const char *rule, struct rule *r, struct rate_limiter *rl, char *goto_chain) {
+static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl, char *goto_chain) {
 	int ret = 0;
-    memset(r, 0, sizeof(*r));
     char fields[256][256];
     char buffer[1024];
     char *key, *value;
 
-    // Copy the input string to a buffer to avoid modifying the original
+	empty_rule_init(r);
     strncpy(buffer, rule, sizeof(buffer));
-    buffer[sizeof(buffer) - 1] = '\0'; // Null-terminate the string
+    buffer[sizeof(buffer) - 1] = '\0'; // Ensure null-terminated
 
-    // Split fields by ','
     char *token = strtok(buffer, ",");
     int field_count = 0;
 
@@ -458,7 +480,7 @@ static int parse_rule(const char *rule, struct rule *r, struct rate_limiter *rl,
 					}
 				}
 			} 
-			else if (strcmpns(key, "dst_ip") == 0) {
+			else if (strcmpns(key, "daddr") == 0) {
 				char *cidr = strchr(value, '/');
 				int v4prefix = 32; // Default prefix length
 				int v6prefix = 128; // Default prefix length
@@ -576,15 +598,15 @@ static int parse_rule(const char *rule, struct rule *r, struct rate_limiter *rl,
 
                 if (rate_limit_str && burst_size_str && limit_type_str) {
                     rl->rate_limit = atoi(rate_limit_str);
-                    rl->max_tokens = atoi(burst_size_str);
+                    rl->bucket_size = atoi(burst_size_str);
 
-					if (rl->rate_limit <= 0 || rl->max_tokens <= 0) {
+					if (rl->rate_limit <= 0 || rl->bucket_size <= 0) {
 						ret |= PARSE_ERR_INVALID_RATE_LIMIT;
 					}
 
-					if (rl->rate_limit > rl->max_tokens) {
+					if (rl->rate_limit > rl->bucket_size) {
 						printf("Rate limit cannot be greater than burst size, set burst size = rate limit\n");
-						rl->max_tokens = rl->rate_limit;
+						rl->bucket_size = rl->rate_limit;
 					}
 
                     if (strcmpns(limit_type_str, "pps") == 0) {
@@ -596,12 +618,12 @@ static int parse_rule(const char *rule, struct rule *r, struct rate_limiter *rl,
                     else if (strcmpns(limit_type_str, "kbps") == 0) {
                         rl->type = LIMIT_BPS;
                         rl->rate_limit *= 1024;
-						rl->max_tokens *= 1024;
+						rl->bucket_size *= 1024;
                     }
                     else if (strcmpns(limit_type_str, "kpps") == 0) {
                         rl->type = LIMIT_PPS;
                         rl->rate_limit *= 1024;
-						rl->max_tokens *= 1024;
+						rl->bucket_size *= 1024;
                     }
                     else {
                         ret |= PARSE_ERR_INVALID_RATE_LIMIT;
@@ -634,20 +656,6 @@ static int parse_rule(const char *rule, struct rule *r, struct rate_limiter *rl,
     return ret;
 }
 
-// Get the first empty key in a array map
-// Return 0 if no empty key is found, otherwise return the key
-static int get_first_empty_key(int map_fd, int max_elem) {
-	int ret = 0;
-	for (int i = 1; i <= max_elem; i++) {
-		void *tmp;
-		if (bpf_map_lookup_elem(map_fd, &i, tmp) && errno == ENOENT) {
-			ret = i;
-			break;
-		}
-	}
-	return ret;
-}
-
 struct appendopt {
 	char *chain;
 	char *rule;
@@ -678,13 +686,15 @@ static struct prog_option append_options[] = {
 
 int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 {
-	int c_map_fd = -1, rl_map_fd = -1, err = EXIT_SUCCESS, lock_fd, c_key, rl_key;
+	int c_map_fd = -1, rl_map_fd = -1, st_map_fd = -1, err = EXIT_SUCCESS;
+	int lock_fd, c_key, rl_key, st_key;
 	const struct appendopt *opt = cfg;
     struct chain c = {};
-	struct rule r = {.match_field_flags = 0};
+	struct rule r;
+	struct rule_stats st = {.bytes=0, .packets=0};
 	struct timespec now;
 	struct rate_limiter rl, tmp_rl;
-	struct bpf_map_info c_info = {}, rl_info = {};
+	struct bpf_map_info c_info = {}, rl_info = {}, st_info = {};
 	char parse_err[100], goto_chain[CHAIN_NAME_LEN];
 
 	// Acquire lock
@@ -713,7 +723,7 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 	pr_debug("Found chain %s with id %d\n", opt->chain, c_key);
 
 	// Parse rule
-	err = parse_rule(opt->rule, &r, &rl, goto_chain);
+	err = decode_rule(opt->rule, &r, &rl, goto_chain);
 	if (err != PARSE_OK) {
 		print_flags(parse_err, sizeof(parse_err), parse_errors, err);
 		err = EXIT_FAILURE;
@@ -764,8 +774,8 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 		}
 		r.exp_match.limiter_id = rl_key;
 	}
-	pr_debug("Rate limiter: rate_limit=%llu, max_tokens=%llu, tokens=%llu, type=%d, enabled=%d\n",
-		rl.rate_limit, rl.max_tokens, rl.tokens, rl.type, rl.enabled);
+	pr_debug("Rate limiter: rate_limit=%llu, bucket_size=%llu, tokens=%llu, type=%d, enabled=%d\n",
+		rl.rate_limit, rl.bucket_size, rl.tokens, rl.type, rl.enabled);
 
 
 	// Handle jump action
@@ -788,8 +798,32 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 		pr_debug("Jumping to chain %s with id %d\n", goto_chain, goto_key);
 	}
 
+	// Update rule stats
+	st_map_fd = get_pinned_map_fd(pin_root_path, "stats_map", &st_info);
+	if (st_map_fd < 0) {
+		pr_warn("Couldn't find stats map.\n");
+		err = EXIT_FAILURE;
+		goto out;
+	}
+	pr_debug("Found stats map with fd %d for map id %d\n", st_map_fd, st_info.id);
+	st_key = get_first_empty_key(st_map_fd, MAX_STATS);
+	if (st_key == MAX_STATS) {
+		pr_warn("Stats map is full\n");
+		err = EXIT_FAILURE;
+		goto out;
+	}
+	err = bpf_map_update_elem(st_map_fd, &st_key, &st, BPF_ANY);
+	if (err) {
+		err = -errno;
+		pr_warn("Couldn't add stats to map: %s\n", strerror(-err));
+		err = EXIT_FAILURE;
+		goto out;
+	}
+	printf("Added stats with id %d\n", st_key);
+
 	// Add rule to chain
-	printf("Adding rule to chain %s\n", opt->chain);
+	pr_debug("Adding rule to chain %s\n", opt->chain);
+	r.stats_id = st_key;
 	c.rule_list[c.num_rules] = r;
 	c.num_rules += 1;
 	err = bpf_map_update_elem(c_map_fd, &c_key, &c, BPF_ANY);
@@ -805,6 +839,8 @@ out:
 		close(c_map_fd);
 	if (rl_map_fd >= 0)
 		close(rl_map_fd);
+	if (st_map_fd >= 0)
+		close(st_map_fd);
 	prog_lock_release(lock_fd);
 	return err;
 }
@@ -959,7 +995,7 @@ static int rule_compare(struct rule *a, struct rule *b) {
 
 int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 {
-	int c_map_fd = -1, rl_map_fd = -1, err = EXIT_SUCCESS, rule_idx = 0; 
+	int c_map_fd = -1, rl_map_fd = -1, st_map_fd = -1, err = EXIT_SUCCESS, rule_idx = -1; 
 	int lock_fd, c_key, rl_key;
 	const struct deleteopt *opt = cfg;
 	struct chain c = {};
@@ -1010,7 +1046,7 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 		r = c.rule_list[rule_idx];
 	}
 	else if (opt->rule_str) {
-		err = parse_rule(opt->rule_str, &r, &rl, goto_chain);
+		err = decode_rule(opt->rule_str, &r, &rl, goto_chain);
 		if (err != PARSE_OK) {
 			pr_debug("Couldn't parse rule: %s\n", opt->rule_str);
 			print_flags(parse_err, sizeof(parse_err), parse_errors, err);
@@ -1018,33 +1054,32 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 			goto out;
 		}
 
-		// Find goto chain id
+		// Find goto chain id if action is jump
 		if (r.rule_action.action == RL_JUMP) {
 			struct chain goto_c;
 			int goto_key;
 			err = get_chain_by_name(goto_chain, c_map_fd, &goto_c, &goto_key);
 			if (err) {
-				pr_debug("Jump error, couldn't find destination chain %s.\n", goto_chain);
+				printf("Jump error, couldn't find destination chain %s.\n", goto_chain);
 				err = EXIT_FAILURE;
 				goto out;
 			}
 			r.rule_action.goto_id = goto_key;
 		}
 
-		for (int i = 1; i <= c.num_rules; i++) {
+		for (int i = 0; i < c.num_rules; i++) {
 			if (rule_compare(&r, &c.rule_list[i])) {
 				rule_idx = i-1;
 				r = c.rule_list[i];
 				break;
 			}
 		}
-		if (rule_idx == 0) {
+		if (rule_idx == -1) {
 			printf("Couldn't find rule %s in chain %s\n", opt->rule_str, opt->chain_name);
 			err = EXIT_FAILURE;
 			goto out;
 		}
 	}
-
 
 	// Delete rate limiter if needed
 	if (r.match_field_flags & MATCH_RATE_LIMIT) {
@@ -1067,6 +1102,17 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 		pr_debug("Deleted rate limiter with id %d\n", rl_key);
 	}
 
+	// Delete rule stats
+	err = bpf_map_delete_elem(st_map_fd, &r.stats_id);
+	if (err) {
+		err = -errno;
+		printf("Couldn't delete stats from map: %s\n", strerror(-err));
+		err = EXIT_FAILURE;
+		goto out;
+	}
+	pr_debug("Deleted stats with id %d\n", r.stats_id);
+
+
 	// Delete rule from chain
 	c.num_rules -= 1;
 	struct rule empty = {.match_field_flags = 0};
@@ -1083,6 +1129,8 @@ out:
 		close(c_map_fd);
 	if (rl_map_fd >= 0)
 		close(rl_map_fd);
+	if (st_map_fd >= 0)
+		close(st_map_fd);
 	prog_lock_release(lock_fd);
 	return err;
 }
@@ -1238,7 +1286,8 @@ static struct prog_option flush_options[] = {
 
 int do_flush(__unused const void *cfg, __unused const char *pin_root_path)
 {
-	int c_map_fd = -1, err = EXIT_SUCCESS, lock_fd, c_key;
+	int c_map_fd = -1, rl_map_fd = -1, st_map_fd = -1, err = EXIT_SUCCESS;
+	int lock_fd, c_key, rl_key, st_key;
 	const struct flushopt *opt = cfg;
 	struct chain c = {};
 	struct bpf_map_info c_info = {};
@@ -1255,6 +1304,21 @@ int do_flush(__unused const void *cfg, __unused const char *pin_root_path)
 		err = EXIT_FAILURE;
 		goto out;
 	}
+
+	rl_map_fd = get_pinned_map_fd(pin_root_path, "limiters_map", NULL);
+	if (rl_map_fd < 0) {
+		pr_warn("Couldn't find rate limiter map.\n");
+		err = EXIT_FAILURE;
+		goto out;
+	}
+
+	st_map_fd = get_pinned_map_fd(pin_root_path, "stats_map", NULL);
+	if (st_map_fd < 0) {
+		pr_warn("Couldn't find stats map.\n");
+		err = EXIT_FAILURE;
+		goto out;
+	}
+
 	err = get_chain_by_name(opt->chain_name, c_map_fd, &c, &c_key);
 	if (err) {
 		pr_debug("Couldn't find chain %s\n", opt->chain_name);
@@ -1263,8 +1327,33 @@ int do_flush(__unused const void *cfg, __unused const char *pin_root_path)
 	}
 	pr_debug("Found chain %s with id %d\n", opt->chain_name, c_key);
 
+	// Delete rate limiters and stats
+	for (int i = 0; i < c.num_rules; i++) {
+		struct rule r = c.rule_list[i];
+		if (r.match_field_flags & MATCH_RATE_LIMIT) {
+			rl_key = r.exp_match.limiter_id;
+			err = bpf_map_delete_elem(rl_map_fd, &rl_key);
+			if (err) {
+				err = -errno;
+				printf("Couldn't delete rate limiter from map: %s\n", strerror(-err));
+				err = EXIT_FAILURE;
+				goto out;
+			}
+			pr_debug("Deleted rate limiter with id %d\n", rl_key);
+		}
+		err = bpf_map_delete_elem(st_map_fd, &r.stats_id);
+		if (err) {
+			err = -errno;
+			printf("Couldn't delete stats from map: %s\n", strerror(-err));
+			err = EXIT_FAILURE;
+			goto out;
+		}
+		pr_debug("Deleted stats with id %d\n", r.stats_id);
+	}
+
 	// Flush chain
 	memset(c.rule_list, 0, sizeof(c.rule_list));
+	c.num_rules = 0;
 	err = bpf_map_update_elem(c_map_fd, &c_key, &c, BPF_ANY);
 	if (err) {
 		err = -errno;
@@ -1277,6 +1366,10 @@ int do_flush(__unused const void *cfg, __unused const char *pin_root_path)
 out:
 	if (c_map_fd >= 0)
 		close(c_map_fd);
+	if (rl_map_fd >= 0)
+		close(rl_map_fd);
+	if (st_map_fd >= 0)
+		close(st_map_fd);
 	prog_lock_release(lock_fd);
 	return err;
 }
@@ -1310,11 +1403,13 @@ static struct prog_option replace_options[] = {
 
 int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 {
-	int c_map_fd = -1, rl_map_fd = -1, err = EXIT_SUCCESS, lock_fd, c_key, rl_key;
+	int c_map_fd = -1, rl_map_fd = -1, st_map_fd = -1, err = EXIT_SUCCESS;
+	int lock_fd, c_key, rl_key;
 	const struct replaceopt *opt = cfg;
 	struct chain c = {};
-	struct rule new_r = {.match_field_flags = 0}, old_r;
+	struct rule new_r, old_r;
 	struct rate_limiter new_rl, old_rl;
+	struct rule_stats st = {.bytes=0, .packets=0};
 	struct bpf_map_info c_info = {}, rl_info = {};
 	char parse_err[100], goto_chain[CHAIN_NAME_LEN];
 
@@ -1345,7 +1440,7 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 	old_r = c.rule_list[opt->dest_id - 1];
 
 	// Parse new rule
-	err = parse_rule(opt->new_rule, &new_r, &new_rl, goto_chain);
+	err = decode_rule(opt->new_rule, &new_r, &new_rl, goto_chain);
 	if (err != PARSE_OK) {
 		print_flags(parse_err, sizeof(parse_err), parse_errors, err);
 		err = EXIT_FAILURE;
@@ -1448,10 +1543,26 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 					goto out;
 				}
 				new_r.exp_match.limiter_id = rl_key;
-				pr_debug("Rate limiter: rate_limit=%llu, max_tokens=%llu, tokens=%llu, type=%d, enabled=%d\n",
-					new_rl.rate_limit, new_rl.max_tokens, new_rl.tokens, new_rl.type, new_rl.enabled);
+				pr_debug("Rate limiter: rate_limit=%llu, bucket_size=%llu, tokens=%llu, type=%d, enabled=%d\n",
+					new_rl.rate_limit, new_rl.bucket_size, new_rl.tokens, new_rl.type, new_rl.enabled);
 			}
 	}
+	// Update rule stats
+	st_map_fd = get_pinned_map_fd(pin_root_path, "stats_map", NULL);
+	if (st_map_fd < 0) {
+		pr_warn("Couldn't find stats map.\n");
+		err = EXIT_FAILURE;
+		goto out;
+	}
+	pr_debug("Found stats map with fd %d\n", st_map_fd);
+	err = bpf_map_update_elem(st_map_fd, &old_r.stats_id, &st, BPF_ANY);
+	if (err) {
+		err = -errno;
+		printf("Couldn't update stats in map: %s\n", strerror(-err));
+		err = EXIT_FAILURE;
+		goto out;
+	}
+	new_r.stats_id = old_r.stats_id;
 
 	// Add rule to chain
 	printf("Adding rule to chain %s\n", opt->chain);
@@ -1485,32 +1596,53 @@ static struct prog_option list_options[] = {
 	END_OPTIONS
 };
 
-static int print_chain(struct chain *c, int c_map_fd) {
+static int print_chain(struct chain *c, int c_map_fd, int st_map_fd) {
 	printf("Chain %s (%d rules)\n", c->name, c->num_rules);
-	printf("%-7s %-12s %-12s %-20s %-20s %s\n", "pkts", "action", "proto", "source", "destination", "details");
+	printf("%-7s %-7s %-12s %-12s %-20s %-20s %s\n", "pkts", "bytes", "action", "proto", "source", "destination", "details");
 	for (int i = 0; i < c->num_rules; i++) {
 		struct rule *r = &c->rule_list[i];
+		struct rule_stats st;
+		int err;
 		char src_ip[60] = "anywhere";
 		char dst_ip[60] = "anywhere";
 		
 		char proto[30] = "";
 		char detail[100] = "";
-		char hit_count[10] = "";
+		char pkts[10] = "";
+		char bytes[10] = "";
 
 		// Format hit count
-		if (r->hit_count < 1024) {
-			snprintf(hit_count, sizeof(hit_count), "%llu", r->hit_count);
-		} else if (r->hit_count < 1024 * 1024) {
-			snprintf(hit_count, sizeof(hit_count), "%.2fK", r->hit_count / 1024.0);
-		} else if (r->hit_count < 1024 * 1024 * 1024) {
-			snprintf(hit_count, sizeof(hit_count), "%.2fM", r->hit_count / (1024.0 * 1024));
-		} else if (r->hit_count < 1024ULL * 1024 * 1024 * 1024) {
-			snprintf(hit_count, sizeof(hit_count), "%.2fG", r->hit_count / (1024.0 * 1024 * 1024));
-		} else {
-			snprintf(hit_count, sizeof(hit_count), "%.2fT", r->hit_count / (1024.0 * 1024 * 1024 * 1024));
+		err = bpf_map_lookup_elem(st_map_fd, &r->stats_id, &st);
+		if (err) {
+			pr_warn("Couldn't find stats for rule %d\n", i+1);
+			continue;
 		}
 
-		
+		if (st.packets < KBYTE_TO_BYTE) {
+			snprintf(pkts, sizeof(pkts), "%llu", st.packets);
+		} else if (st.packets < MBYTE_TO_BYTE) {
+			snprintf(pkts, sizeof(pkts), "%.2fK", (double)st.packets/KBYTE_TO_BYTE);
+		} else if (st.packets < GBYTE_TO_BYTE) {
+			snprintf(pkts, sizeof(pkts), "%.2fM", (double)st.packets/MBYTE_TO_BYTE);
+		} else if (st.packets < TBYTE_TO_BYTE) {
+			snprintf(pkts, sizeof(pkts), "%.2fG", (double)st.packets/GBYTE_TO_BYTE);
+		} else {
+			snprintf(pkts, sizeof(pkts), "%.2fT", (double)st.packets/TBYTE_TO_BYTE);
+		}
+
+		if (st.bytes < KBYTE_TO_BYTE) {
+			snprintf(bytes, sizeof(bytes), "%llu", st.bytes);
+		} else if (st.bytes < MBYTE_TO_BYTE) {
+			snprintf(bytes, sizeof(bytes), "%.2fK", (double)st.bytes/KBYTE_TO_BYTE);
+		} else if (st.bytes < GBYTE_TO_BYTE) {
+			snprintf(bytes, sizeof(bytes), "%.2fM", (double)st.bytes/MBYTE_TO_BYTE);
+		} else if (st.bytes < TBYTE_TO_BYTE) {
+			snprintf(bytes, sizeof(bytes), "%.2fG", (double)st.bytes/GBYTE_TO_BYTE);
+		} else {
+			snprintf(bytes, sizeof(bytes), "%.2fT", (double)st.bytes/TBYTE_TO_BYTE);
+		}
+
+		// Format rule details
 		if (r->match_field_flags & MATCH_IPV4) {
 			strcat(proto, "ipv4,");
 			if (r->match_field_flags & MATCH_SRC_ADDR) {
@@ -1585,7 +1717,6 @@ static int print_chain(struct chain *c, int c_map_fd) {
 		}
 
 		char *action;
-		int err;
 		struct chain goto_c;
 		int goto_key;
 		switch (r->rule_action.action) {
@@ -1597,7 +1728,6 @@ static int print_chain(struct chain *c, int c_map_fd) {
 			break;
 		case RL_JUMP:
 			goto_key = r->rule_action.goto_id;
-			action = "JUMP";
 			err = bpf_map_lookup_elem(c_map_fd, &goto_key, &goto_c);
 			if (err) {
 				strcat(action, "UNKNOWN");
@@ -1610,14 +1740,14 @@ static int print_chain(struct chain *c, int c_map_fd) {
 			break;
 		}
 
-		printf("%-7s %-12s %-12s %-20s %-20s %s\n", hit_count, action, proto, src_ip, dst_ip, detail);
+		printf("%-7s %-7s %-12s %-12s %-20s %-20s %s\n", pkts, bytes, action, proto, src_ip, dst_ip, detail);
 	}
 	return 0;
 }
 
 int do_list(__unused const void *cfg, __unused const char *pin_root_path)
 {
-	int c_map_fd = -1, err = EXIT_SUCCESS, lock_fd, c_key;
+	int c_map_fd = -1, st_map_fd = -1, err = EXIT_SUCCESS, lock_fd, c_key;
 	const struct listopt *opt = cfg;
 	struct chain c = {};
 	struct bpf_map_info c_info = {};
@@ -1635,6 +1765,13 @@ int do_list(__unused const void *cfg, __unused const char *pin_root_path)
 		goto out;
 	}
 
+	st_map_fd = get_pinned_map_fd(pin_root_path, "stats_map", NULL);
+	if (st_map_fd < 0) {
+		pr_warn("Couldn't find stats map.\n");
+		err = EXIT_FAILURE;
+		goto out;
+	}
+
 	if (opt->chain_name) {
 		err = get_chain_by_name(opt->chain_name, c_map_fd, &c, &c_key);
 		if (err) {
@@ -1642,7 +1779,7 @@ int do_list(__unused const void *cfg, __unused const char *pin_root_path)
 			err = EXIT_FAILURE;
 			goto out;
 		}
-		print_chain(&c, c_map_fd);
+		print_chain(&c, c_map_fd, st_map_fd);
 	} else {
 		int key, prev_key;
 		FOR_EACH_MAP_KEY(err, c_map_fd, key, prev_key) {
@@ -1651,7 +1788,7 @@ int do_list(__unused const void *cfg, __unused const char *pin_root_path)
 				continue;
 			}
 			if (c.num_rules > 0)
-				print_chain(&c, c_map_fd);
+				print_chain(&c, c_map_fd, st_map_fd);
 		}
 	}
 
@@ -1661,6 +1798,205 @@ out:
 	prog_lock_release(lock_fd);
 	return err;
 }
+
+// static int encode_rule(struct rule *r, int c_map_fd, int rl_map_fd, char *buf, bool cnt_enabled) 
+// {
+// 	int ret = 0;
+// 	if (cnt_enabled) {
+// 		buf += sprintf(buf, "[hit_count=%llu]", r->hit_count);
+// 	}
+// 	// Handle header match
+// 	if (r->match_field_flags & MATCH_IPV4) {
+// 		buf += sprintf(buf, "l3_proto=ipv4,");
+// 		if (r->match_field_flags & MATCH_SRC_ADDR)
+// 			buf += sprintf(buf, "saddr=%s/%d,", inet_ntoa(*(struct in_addr *)&r->hdr_match.src_ip.ipv4.addr),__builtin_popcount(r->hdr_match.src_ip.ipv4.mask));
+// 		if (r->match_field_flags & MATCH_DST_ADDR)
+// 			buf += sprintf(buf, "daddr=%s/%d,", inet_ntoa(*(struct in_addr *)&r->hdr_match.dst_ip.ipv4.addr),__builtin_popcount(r->hdr_match.src_ip.ipv4.mask));
+// 	} else if (r->match_field_flags & MATCH_IPV6) {
+// 		buf += sprintf(buf, "l3_proto=ipv6,");
+// 		if (r->match_field_flags & MATCH_SRC_ADDR) {
+// 			char src_ip[INET6_ADDRSTRLEN];
+// 			inet_ntop(AF_INET6, &r->hdr_match.src_ip.ipv6.addr, src_ip, sizeof(src_ip));
+// 			buf += sprintf(buf, "saddr=%s/%d,", src_ip, __builtin_popcountll(*(uint64_t *)&r->hdr_match.src_ip.ipv6.mask[0]) + __builtin_popcountll(*(uint64_t *)&r->hdr_match.src_ip.ipv6.mask[8]));
+// 		}
+// 		if (r->match_field_flags & MATCH_DST_ADDR) {
+// 			char dst_ip[INET6_ADDRSTRLEN];
+// 			inet_ntop(AF_INET6, &r->hdr_match.dst_ip.ipv6.addr, dst_ip, sizeof(dst_ip));
+// 			buf += sprintf(buf, "daddr=%s/%d,", dst_ip, __builtin_popcountll(*(uint64_t *)&r->hdr_match.src_ip.ipv6.mask[0]) + __builtin_popcountll(*(uint64_t *)&r->hdr_match.src_ip.ipv6.mask[8]));
+// 		}
+// 	}
+// 	if (r->match_field_flags & MATCH_TCP) {
+// 		buf += sprintf(buf, "l4_proto=tcp,");
+// 		if (r->match_field_flags & MATCH_SPORT)
+// 			buf += sprintf(buf, "sport=%d,", ntohs(r->hdr_match.sport));
+// 		if (r->match_field_flags & MATCH_DPORT)
+// 			buf += sprintf(buf, "dport=%d,", ntohs(r->hdr_match.dport));
+// 		if (r->match_field_flags & MATCH_TCP_FLAGS) {
+// 			char tcp_flags[35];
+// 			if (r->hdr_match.tcp_flags & TCP_FLAG_SYN) strcat(tcp_flags, "SYN|");
+// 			if (r->hdr_match.tcp_flags & TCP_FLAG_ACK) strcat(tcp_flags, "ACK|");
+// 			if (r->hdr_match.tcp_flags & TCP_FLAG_FIN) strcat(tcp_flags, "FIN|");
+// 			if (r->hdr_match.tcp_flags & TCP_FLAG_URG) strcat(tcp_flags, "URG|");
+// 			if (r->hdr_match.tcp_flags & TCP_FLAG_PSH) strcat(tcp_flags, "PSH|");
+// 			if (r->hdr_match.tcp_flags & TCP_FLAG_RST) strcat(tcp_flags, "RST|");
+// 			if (r->hdr_match.tcp_flags & TCP_FLAG_ECE) strcat(tcp_flags, "ECE|");
+// 			if (r->hdr_match.tcp_flags & TCP_FLAG_CWR) strcat(tcp_flags, "CWR|");
+// 			if (tcp_flags[strlen(tcp_flags) - 1] == '|') tcp_flags[strlen(tcp_flags) - 1] = '\0';
+// 			buf += sprintf(buf, "tcp_flags=%s,", tcp_flags);
+// 		}
+// 	}
+// 	if (r->match_field_flags & MATCH_UDP) { 
+// 		buf += sprintf(buf, "l4_proto=udp,");
+// 		if (r->match_field_flags & MATCH_SPORT)
+// 			buf += sprintf(buf, "sport=%d,", ntohs(r->hdr_match.sport));
+// 		if (r->match_field_flags & MATCH_DPORT)
+// 			buf += sprintf(buf, "dport=%d,", ntohs(r->hdr_match.dport));
+// 	} 
+// 	if (r->match_field_flags & MATCH_ICMP) {
+// 		buf += sprintf(buf, "l4_proto=icmp,");
+// 		if (r->match_field_flags & MATCH_ICMP_TYPE)
+// 			buf += sprintf(buf, "icmp_type=%d,", r->hdr_match.icmp_type);
+// 		if (r->match_field_flags & MATCH_ICMP_CODE)
+// 			buf += sprintf(buf, "icmp_code=%d,", r->hdr_match.icmp_code);
+// 	}
+// 	if (r->match_field_flags & MATCH_ICMPV6) {
+// 		buf += sprintf(buf, "l4_proto=icmpv6,");
+// 		if (r->match_field_flags & MATCH_ICMP_TYPE)
+// 			buf += sprintf(buf, "icmp_type=%d,", r->hdr_match.icmp_type);
+// 		if (r->match_field_flags & MATCH_ICMP_CODE)
+// 			buf += sprintf(buf, "icmp_code=%d,", r->hdr_match.icmp_code);
+// 	}
+// 	if (r->match_field_flags & MATCH_RATE_LIMIT) {
+// 		char limit_type[10];
+// 		if (rl->type == LIMIT_PPS) {
+// 			strcpy(limit_type, "pps");
+// 		} else if (r->exp_match.limiter.type == LIMIT_BPS) {
+// 			strcpy(limit_type, "bps");
+// 		} 
+// 		buf += sprintf(buf, "limit=%llu|%llu|%s,", rl->rate_limit, rl->bucket_size, limit_type);
+// 	}
+
+// 	// Handle rule action
+// 	if (r->rule_action.action == RL_DROP) {
+// 		buf += sprintf(buf, "action=drop");
+// 	} else if (r->rule_action.action == RL_ACCEPT) {
+// 		buf += sprintf(buf, "action=accept");
+// 	} else if (r->rule_action.action == RL_JUMP) {
+// 		int err;
+// 		struct chain goto_c;
+// 		err = bpf_map_lookup_elem(c_map_fd, &r->rule_action.goto_id, &goto_c);
+// 		buf += sprintf(buf, "goto=%s", goto_chain);
+// 	}
+// }
+
+// struct saveopt {
+// 	char *file;
+// 	char *chain_name;
+// 	bool counter;
+// } defaults_save = {.counter = false};
+
+// static struct prog_option save_options[] = {
+// 	DEFINE_OPTION("file", OPT_STRING, struct saveopt, file,
+// 			  .metavar = "<file_name>",
+// 			  .short_opt = 'f',
+// 			  .required = true,
+// 			  .help = "File name to save rules"),
+// 	DEFINE_OPTION("chain", OPT_STRING, struct saveopt, chain_name,
+// 			  .metavar = "<chain_name>",
+// 			  .short_opt = 'c',
+// 			  .help = "Chain name. If not specified, save all chains"),
+// 	DEFINE_OPTION("counter", OPT_BOOL, struct saveopt, counter,
+// 			  .short_opt = 'C',
+// 			  .help = "Save hit counters"),
+// 	END_OPTIONS
+// };
+
+// int do_save(__unused const void *cfg, __unused const char *pin_root_path)
+// {
+// 	int c_map_fd = -1, rl_map_fd = -1, err = EXIT_SUCCESS, lock_fd, c_key;
+// 	const struct saveopt *opt = cfg;
+// 	time_t rawtime;
+// 	struct tm *timeinfo;
+// 	struct chain c = {};
+// 	struct bpf_map_info c_info = {};
+// 	char buf[200];
+// 	FILE *fp;
+
+// 	// Acquire lock
+// 	lock_fd = prog_lock_acquire(pin_root_path);
+// 	if (lock_fd < 0)
+// 		return lock_fd;
+
+// 	fp = fopen(opt->file, "w");
+// 	if (!fp) {
+// 		pr_warn("Couldn't open file %s: %s\n", opt->file, strerror(errno));
+// 		err = EXIT_FAILURE;
+// 		goto out;
+// 	}
+// 	time(&rawtime);
+// 	timeinfo = localtime(&rawtime);
+// 	fprintf(fp, "# xdpnf rules saved on %s \n", asctime(timeinfo));
+
+// 	// Get chain map	
+// 	c_map_fd = get_pinned_map_fd(pin_root_path, "chains_map", &c_info);
+// 	if (c_map_fd < 0) {
+// 		pr_warn("Couldn't find chain map; is xdpnf loaded?\n");
+// 		err = EXIT_FAILURE;
+// 		goto out;
+// 	}
+
+// 	// Get rate limiter map
+// 	rl_map_fd = get_pinned_map_fd(pin_root_path, "limiters_map", &c_info);
+// 	if (rl_map_fd < 0) {
+// 		pr_warn("Couldn't find rate limiter map; is xdpnf loaded?\n");
+// 		err = EXIT_FAILURE;
+// 		goto out;
+// 	}
+
+// 	if (opt->chain_name) {
+// 		err = get_chain_by_name(opt->chain_name, c_map_fd, &c, &c_key);
+// 		if (err) {
+// 			pr_debug("Couldn't find chain %s\n", opt->chain_name);
+// 			err = EXIT_FAILURE;
+// 			goto out;
+// 		}
+// 		fprintf(fp, "*%s (%d rules)\n", c.name, c.num_rules);
+// 		for (int i = 0; i < c.num_rules; i++) {
+// 			struct rule *r = &c.rule_list[i];
+// 			memset(buf, 0, sizeof(buf));
+// 			encode_rule(r, buf, c_map_fd, rl_map_fd, opt->counter);
+// 			fprintf(fp, "-c %s -r %s\n", c.name, buf);
+// 			}
+// 		goto out;
+// 	}
+
+// 	int key, prev_key;
+// 	FOR_EACH_MAP_KEY(err, c_map_fd, key, prev_key) {
+// 		err = bpf_map_lookup_elem(c_map_fd, &key, &c);
+// 		if (err) {
+// 			continue;
+// 		}
+// 		if (c.num_rules > 0) {
+// 			fprintf(fp, "*%s (%d rules)\n", c.name, c.num_rules);
+// 			for (int i = 0; i < c.num_rules; i++) {
+// 				struct rule *r = &c.rule_list[i];
+// 				memset(buf, 0, sizeof(buf));
+// 				encode_rule(r, buf, opt->counter);
+// 				fprintf(fp, "-c %s -r %s\n", c.name, buf);
+// 			}
+// 		}
+// 	}
+
+
+// out:
+// 	if (c_map_fd >= 0)
+// 		close(c_map_fd);
+// 	if (fp)
+// 		fclose(fp);
+// 	prog_lock_release(lock_fd);
+// 	return err;
+// }
+			
 
 int do_help(__unused const void *cfg, __unused const char *pin_root_path)
 {
@@ -1672,7 +2008,7 @@ int do_help(__unused const void *cfg, __unused const char *pin_root_path)
 		"       unload          unload xdpnf from an interface\n"
 		"       append          append a rule to a chain\n"
 		"       delete          delete a rule from a chain\n"
-		"       insert          insert a rule to a chain\n"
+		// "       insert          insert a rule to a chain\n"
 		"       replace         replace a rule in a chain\n"
 		"       list            list all rules in a chain\n"
 		"       flush           flush all rules in a chain\n"
@@ -1680,6 +2016,7 @@ int do_help(__unused const void *cfg, __unused const char *pin_root_path)
 		"       delchain        delete a chain\n"
 		"       rechain         rename a chain\n"
 		"       save            save all rules into a file\n"
+		"       restore         restore all rules from a file\n"
 		"\n"
 		"Use 'xdpnf COMMAND --help' to see options for each command\n");
 	return -1;
@@ -1698,6 +2035,7 @@ static const struct prog_command cmds[] = {
     DEFINE_COMMAND(delchain, "Delete a chain"),
     DEFINE_COMMAND(rechain, "Rename a chain"),
     // DEFINE_COMMAND(save, "Save all rules into a file"),
+	// DEFINE_COMMAND(restore, "Restore all rules from a file"),
 	{ .name = "help", .func = do_help, .no_cfg = true },
 	END_COMMANDS
 };
@@ -1715,6 +2053,7 @@ union all_opts {
 	struct delchainopt delchain;
 	struct rechainopt rechain;
 	// struct saveopt save;
+	// struct restoreopt restore;
 };
 
 int main(int argc, char **argv)
