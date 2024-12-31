@@ -380,11 +380,11 @@ static int get_first_empty_key(int map_fd, int max_elem) {
 
 static void empty_rule_init(struct rule *r) {
 	r->match_field_flags = 0;
-	memset(r->hdr_match.src_ip.ipv6.addr, 0xFF, sizeof(r->hdr_match.src_ip.ipv6.addr));
-	memset(r->hdr_match.dst_ip.ipv6.addr, 0xFF, sizeof(r->hdr_match.dst_ip.ipv6.addr));
-	memset(r->hdr_match.src_ip.ipv6.mask, 0xFF, sizeof(r->hdr_match.src_ip.ipv6.mask));
-	memset(r->hdr_match.dst_ip.ipv6.mask, 0xFF, sizeof(r->hdr_match.dst_ip.ipv6.mask));
-	r->hdr_match.tcp_flags = ~0u;
+	// memset(r->src_ip.ipv6.addr, 0xFF, sizeof(r->src_ip.ipv6.addr));
+	// memset(r->dst_ip.ipv6.addr, 0xFF, sizeof(r->dst_ip.ipv6.addr));
+	memset(r->src_ip.ipv6.mask, 0xFF, sizeof(r->src_ip.ipv6.mask));
+	memset(r->dst_ip.ipv6.mask, 0xFF, sizeof(r->dst_ip.ipv6.mask));
+	r->tcp_flags = ~0u;
 }
 
 // No case-insensitive string comparison
@@ -455,27 +455,27 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
                 } 
 
 				if (r->match_field_flags & MATCH_IPV4) {
-					if (inet_pton(AF_INET, value, &r->hdr_match.src_ip.ipv4.addr) != 1) {
+					if (inet_pton(AF_INET, value, &r->src_ip.ipv4.addr) != 1) {
 						ret |= PARSE_ERR_INVALID_IP_ADDR;
 					}
 					r->match_field_flags |= MATCH_SRC_ADDR;
-					r->hdr_match.src_ip.ipv4.mask = htonl((0xFFFFFFFF << (32 - v4prefix)) & 0xFFFFFFFF);
+					r->src_ip.ipv4.mask = htonl((0xFFFFFFFF << (32 - v4prefix)) & 0xFFFFFFFF);
 				} 
 				else if (r->match_field_flags & MATCH_IPV6) {
-					if (inet_pton(AF_INET6, value, &r->hdr_match.src_ip.ipv6.addr) != 1) {
+					if (inet_pton(AF_INET6, value, &r->src_ip.ipv6.addr) != 1) {
 						ret |= PARSE_ERR_INVALID_IP_ADDR; 
 					}
 					// Calculate the IPv6 mask
 					r->match_field_flags |= MATCH_SRC_ADDR;
 					for (int i = 0; i < 16; i++) {
 						if (v6prefix >= 8) {
-							r->hdr_match.src_ip.ipv6.mask[i] = 0xFF;
+							r->src_ip.ipv6.mask[i] = 0xFF;
 							v6prefix -= 8;
 						} else if (v6prefix > 0) {
-							r->hdr_match.src_ip.ipv6.mask[i] = (0xFF << (8 - v6prefix)) & 0xFF;
+							r->src_ip.ipv6.mask[i] = (0xFF << (8 - v6prefix)) & 0xFF;
 							v6prefix = 0;
 						} else {
-							r->hdr_match.src_ip.ipv6.mask[i] = 0x00;
+							r->src_ip.ipv6.mask[i] = 0x00;
 						}
 					}
 				}
@@ -494,27 +494,27 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
 				} 
 
 				if (r->match_field_flags & MATCH_IPV4) {
-					if (inet_pton(AF_INET, value, &r->hdr_match.dst_ip.ipv4.addr) != 1) {
+					if (inet_pton(AF_INET, value, &r->dst_ip.ipv4.addr) != 1) {
 						ret |= PARSE_ERR_INVALID_IP_ADDR;
 					}
 					r->match_field_flags |= MATCH_DST_ADDR;
-					r->hdr_match.dst_ip.ipv4.mask = htonl((0xFFFFFFFF << (32 - v4prefix)) & 0xFFFFFFFF);
+					r->dst_ip.ipv4.mask = htonl((0xFFFFFFFF << (32 - v4prefix)) & 0xFFFFFFFF);
 				} 
 				else if (r->match_field_flags & MATCH_IPV6) {
-					if (inet_pton(AF_INET6, value, &r->hdr_match.dst_ip.ipv6.addr) != 1) {
+					if (inet_pton(AF_INET6, value, &r->dst_ip.ipv6.addr) != 1) {
 						ret |= PARSE_ERR_INVALID_IP_ADDR; 
 					}
 					// Calculate the IPv6 mask
 					r->match_field_flags |= MATCH_DST_ADDR;
 					for (int i = 0; i < 16; i++) {
 						if (v6prefix >= 8) {
-							r->hdr_match.dst_ip.ipv6.mask[i] = 0xFF;
+							r->dst_ip.ipv6.mask[i] = 0xFF;
 							v6prefix -= 8;
 						} else if (v6prefix > 0) {
-							r->hdr_match.dst_ip.ipv6.mask[i] = (0xFF << (8 - v6prefix)) & 0xFF;
+							r->dst_ip.ipv6.mask[i] = (0xFF << (8 - v6prefix)) & 0xFF;
 							v6prefix = 0;
 						} else {
-							r->hdr_match.dst_ip.ipv6.mask[i] = 0x00;
+							r->dst_ip.ipv6.mask[i] = 0x00;
 						}
 					}
 				}
@@ -538,7 +538,7 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
 					ret |= PARSE_ERR_INVALID_PORT;
 				} else {
 					r->match_field_flags |= MATCH_SPORT;
-					r->hdr_match.sport = htons((uint16_t)port);
+					r->sport = htons((uint16_t)port);
 				}
 			} 
 			else if (strcmpns(key, "dport") == 0) {
@@ -547,21 +547,21 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
 					ret |= PARSE_ERR_INVALID_PORT;
 				} else {
 					r->match_field_flags |= MATCH_DPORT;
-					r->hdr_match.dport = htons((uint16_t)port);
+					r->dport = htons((uint16_t)port);
 				}
 			} 
 			else if (strcmpns(key, "tcp_flags") == 0) {
 				char *flag_token = strtok(value, "|");
                 bool valid_flags = TRUE;
                 while (flag_token) {
-                    if (strcmpns(flag_token, "syn") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_SYN;
-                    else if (strcmpns(flag_token, "ack") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_ACK;
-                    else if (strcmpns(flag_token, "fin") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_FIN;
-                    else if (strcmpns(flag_token, "urg") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_URG;
-                    else if (strcmpns(flag_token, "psh") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_PSH;
-                    else if (strcmpns(flag_token, "rst") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_RST;
-                    else if (strcmpns(flag_token, "ece") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_ECE;
-                    else if (strcmpns(flag_token, "cwr") == 0) r->hdr_match.tcp_flags |= TCP_FLAG_CWR;
+                    if (strcmpns(flag_token, "syn") == 0) r->tcp_flags |= TCP_FLAG_SYN;
+                    else if (strcmpns(flag_token, "ack") == 0) r->tcp_flags |= TCP_FLAG_ACK;
+                    else if (strcmpns(flag_token, "fin") == 0) r->tcp_flags |= TCP_FLAG_FIN;
+                    else if (strcmpns(flag_token, "urg") == 0) r->tcp_flags |= TCP_FLAG_URG;
+                    else if (strcmpns(flag_token, "psh") == 0) r->tcp_flags |= TCP_FLAG_PSH;
+                    else if (strcmpns(flag_token, "rst") == 0) r->tcp_flags |= TCP_FLAG_RST;
+                    else if (strcmpns(flag_token, "ece") == 0) r->tcp_flags |= TCP_FLAG_ECE;
+                    else if (strcmpns(flag_token, "cwr") == 0) r->tcp_flags |= TCP_FLAG_CWR;
                     else {
                         valid_flags = FALSE;
                         ret |= PARSE_ERR_INVALID_TCP_FLAGS;
@@ -578,7 +578,7 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
 					ret |= PARSE_ERR_INVALID_ICMP_TYPE;
 				} else {
 					r->match_field_flags |= MATCH_ICMP_TYPE;
-					r->hdr_match.icmp_type = (uint8_t)icmp_type;
+					r->icmp_type = (uint8_t)icmp_type;
 				}
 			} 
 			else if (strcmpns(key, "icmp_code") == 0) {
@@ -588,7 +588,7 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
 				} 
 				else {
 					r->match_field_flags |= MATCH_ICMP_CODE;
-					r->hdr_match.icmp_code = (uint8_t)icmp_code;
+					r->icmp_code = (uint8_t)icmp_code;
 				}
 			} 
 			else if (strcmpns(key, "limit") == 0) {
@@ -636,17 +636,17 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
 			}
 			else if (strcmpns(key, "action") == 0) {
 				if (strcmpns(value, "drop") == 0) {
-					r->rule_action.action = RL_DROP;
+					r->action = RL_DROP;
 				} 
 				else if (strcmpns(value, "accept") == 0) {
-					r->rule_action.action = RL_ACCEPT;
+					r->action = RL_ACCEPT;
 				} 
 				else {
 					ret |= PARSE_ERR_INVALID_ACTION;
 				}
 			}
 			else if (strcmpns(key, "goto") == 0) {
-				r->rule_action.action = RL_JUMP;
+				r->action = RL_JUMP;
 				strncpy(goto_chain, value, 32);
 			}
         } else {
@@ -732,13 +732,13 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 	pr_debug("Parsed rule: l3_proto=%s, l4_proto=%s, saddr=%s, daddr=%s, sport=%d, dport=%d, tcp_flags=0x%x, icmp_type=%d, icmp_code=%d\n",
 		(r.match_field_flags & MATCH_IPV4) ? "ipv4" : "ipv6",
 		(r.match_field_flags & MATCH_TCP) ? "tcp" : (r.match_field_flags & MATCH_UDP) ? "udp" : (r.match_field_flags & MATCH_ICMP) ? "icmp" : "icmpv6",
-		(r.match_field_flags & MATCH_IPV4) ? inet_ntoa(*(struct in_addr *)&r.hdr_match.src_ip.ipv4.addr) : inet_ntop(AF_INET6, &r.hdr_match.src_ip.ipv6, parse_err, sizeof(parse_err)),
-		(r.match_field_flags & MATCH_IPV4) ? inet_ntoa(*(struct in_addr *)&r.hdr_match.dst_ip.ipv4.addr) : inet_ntop(AF_INET6, &r.hdr_match.dst_ip.ipv6, parse_err, sizeof(parse_err)),
-		(r.match_field_flags & MATCH_SPORT) ? ntohs(r.hdr_match.sport) : 0,
-		(r.match_field_flags & MATCH_DPORT) ? ntohs(r.hdr_match.dport) : 0,
-		(r.match_field_flags & MATCH_TCP_FLAGS) ? r.hdr_match.tcp_flags : 0,
-		(r.match_field_flags & MATCH_ICMP_TYPE) ? r.hdr_match.icmp_type : 0,
-		(r.match_field_flags & MATCH_ICMP_CODE) ? r.hdr_match.icmp_code : 0);
+		(r.match_field_flags & MATCH_IPV4) ? inet_ntoa(*(struct in_addr *)&r.src_ip.ipv4.addr) : inet_ntop(AF_INET6, &r.src_ip.ipv6, parse_err, sizeof(parse_err)),
+		(r.match_field_flags & MATCH_IPV4) ? inet_ntoa(*(struct in_addr *)&r.dst_ip.ipv4.addr) : inet_ntop(AF_INET6, &r.dst_ip.ipv6, parse_err, sizeof(parse_err)),
+		(r.match_field_flags & MATCH_SPORT) ? ntohs(r.sport) : 0,
+		(r.match_field_flags & MATCH_DPORT) ? ntohs(r.dport) : 0,
+		(r.match_field_flags & MATCH_TCP_FLAGS) ? r.tcp_flags : 0,
+		(r.match_field_flags & MATCH_ICMP_TYPE) ? r.icmp_type : 0,
+		(r.match_field_flags & MATCH_ICMP_CODE) ? r.icmp_code : 0);
 	
 	// Add rate limiter if needed
 	if (r.match_field_flags & MATCH_RATE_LIMIT) {
@@ -772,14 +772,14 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 			err = EXIT_FAILURE;
 			goto out;
 		}
-		r.exp_match.limiter_id = rl_key;
+		r.limiter_id = rl_key;
 	}
 	pr_debug("Rate limiter: rate_limit=%llu, bucket_size=%llu, tokens=%llu, type=%d, enabled=%d\n",
 		rl.rate_limit, rl.bucket_size, rl.tokens, rl.type, rl.enabled);
 
 
 	// Handle jump action
-	if (r.rule_action.action == RL_JUMP) {
+	if (r.action == RL_JUMP) {
 		struct chain goto_c;
 		int goto_key;
 		err = get_chain_by_name(goto_chain, c_map_fd, &goto_c, &goto_key);
@@ -794,7 +794,7 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 			goto out;
 		}
 
-		r.rule_action.goto_id = goto_key;
+		r.goto_id = goto_key;
 		pr_debug("Jumping to chain %s with id %d\n", goto_chain, goto_key);
 	}
 
@@ -939,55 +939,55 @@ static int rule_compare(struct rule *a, struct rule *b) {
 	if (a->match_field_flags != b->match_field_flags) {
 		return FALSE;
 	}
-	if (a->rule_action.action != b->rule_action.action) {
+	if (a->action != b->action) {
 		return FALSE;
 	}
-	if (a->rule_action.goto_id != b->rule_action.goto_id) {
+	if (a->goto_id != b->goto_id) {
 		return FALSE;
 	}
-	if (a->exp_match.limiter_id != b->exp_match.limiter_id) {
+	if (a->limiter_id != b->limiter_id) {
 		return FALSE;
 	}
 	if (a->match_field_flags & MATCH_IPV4) {
-		if (a->hdr_match.src_ip.ipv4.addr != b->hdr_match.src_ip.ipv4.addr) {
+		if (a->src_ip.ipv4.addr != b->src_ip.ipv4.addr) {
 			return FALSE;
 		}
-		if (a->hdr_match.src_ip.ipv4.mask != b->hdr_match.src_ip.ipv4.mask) {
+		if (a->src_ip.ipv4.mask != b->src_ip.ipv4.mask) {
 			return FALSE;
 		}
-		if (a->hdr_match.dst_ip.ipv4.addr != b->hdr_match.dst_ip.ipv4.addr) {
+		if (a->dst_ip.ipv4.addr != b->dst_ip.ipv4.addr) {
 			return FALSE;
 		}
-		if (a->hdr_match.dst_ip.ipv4.mask != b->hdr_match.dst_ip.ipv4.mask) {
+		if (a->dst_ip.ipv4.mask != b->dst_ip.ipv4.mask) {
 			return FALSE;
 		}
 	} else if (a->match_field_flags & MATCH_IPV6) {
-		if (memcmp(&a->hdr_match.src_ip.ipv6.addr, &b->hdr_match.src_ip.ipv6.addr, sizeof(a->hdr_match.src_ip.ipv6.addr)) != 0) {
+		if (memcmp(&a->src_ip.ipv6.addr, &b->src_ip.ipv6.addr, sizeof(a->src_ip.ipv6.addr)) != 0) {
 			return FALSE;
 		}
-		if (memcmp(&a->hdr_match.src_ip.ipv6.mask, &b->hdr_match.src_ip.ipv6.mask, sizeof(a->hdr_match.src_ip.ipv6.mask)) != 0) {
+		if (memcmp(&a->src_ip.ipv6.mask, &b->src_ip.ipv6.mask, sizeof(a->src_ip.ipv6.mask)) != 0) {
 			return FALSE;
 		}
-		if (memcmp(&a->hdr_match.dst_ip.ipv6.addr, &b->hdr_match.dst_ip.ipv6.addr, sizeof(a->hdr_match.dst_ip.ipv6.addr)) != 0) {
+		if (memcmp(&a->dst_ip.ipv6.addr, &b->dst_ip.ipv6.addr, sizeof(a->dst_ip.ipv6.addr)) != 0) {
 			return FALSE;
 		}
-		if (memcmp(&a->hdr_match.dst_ip.ipv6.mask, &b->hdr_match.dst_ip.ipv6.mask, sizeof(a->hdr_match.dst_ip.ipv6.mask)) != 0) {
+		if (memcmp(&a->dst_ip.ipv6.mask, &b->dst_ip.ipv6.mask, sizeof(a->dst_ip.ipv6.mask)) != 0) {
 			return FALSE;
 		}
 	}
-	if (a->hdr_match.sport != b->hdr_match.sport) {
+	if (a->sport != b->sport) {
 		return FALSE;
 	}
-	if (a->hdr_match.dport != b->hdr_match.dport) {
+	if (a->dport != b->dport) {
 		return FALSE;
 	}
-	if (a->hdr_match.tcp_flags != b->hdr_match.tcp_flags) {
+	if (a->tcp_flags != b->tcp_flags) {
 		return FALSE;
 	}
-	if (a->hdr_match.icmp_type != b->hdr_match.icmp_type) {
+	if (a->icmp_type != b->icmp_type) {
 		return FALSE;
 	}
-	if (a->hdr_match.icmp_code != b->hdr_match.icmp_code) {
+	if (a->icmp_code != b->icmp_code) {
 		return FALSE;
 	}
 	return TRUE;
@@ -1055,7 +1055,7 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 		}
 
 		// Find goto chain id if action is jump
-		if (r.rule_action.action == RL_JUMP) {
+		if (r.action == RL_JUMP) {
 			struct chain goto_c;
 			int goto_key;
 			err = get_chain_by_name(goto_chain, c_map_fd, &goto_c, &goto_key);
@@ -1064,7 +1064,7 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 				err = EXIT_FAILURE;
 				goto out;
 			}
-			r.rule_action.goto_id = goto_key;
+			r.goto_id = goto_key;
 		}
 
 		for (int i = 0; i < c.num_rules; i++) {
@@ -1090,7 +1090,7 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 			goto out;
 		}
 		pr_debug("Found rate limiter map with fd %d for map id %d\n", rl_map_fd, rl_info.id);
-		rl_key = r.exp_match.limiter_id;
+		rl_key = r.limiter_id;
 
 		err = bpf_map_delete_elem(rl_map_fd, &rl_key);
 		if (err) {
@@ -1183,7 +1183,7 @@ int do_delchain(__unused const void *cfg, __unused const char *pin_root_path)
 			continue;
 		}
 		for (int i = 0; i < c.num_rules; i++) {
-			if (c.rule_list[i].rule_action.action == RL_JUMP && c.rule_list[i].rule_action.goto_id == c_key) {
+			if (c.rule_list[i].action == RL_JUMP && c.rule_list[i].goto_id == c_key) {
 				printf("Rule %d in chain %s jumps to chain %s, please delete it first\n", i+1, c.name, opt->chain_name);
 				err = EXIT_FAILURE;
 				goto out;
@@ -1331,7 +1331,7 @@ int do_flush(__unused const void *cfg, __unused const char *pin_root_path)
 	for (int i = 0; i < c.num_rules; i++) {
 		struct rule r = c.rule_list[i];
 		if (r.match_field_flags & MATCH_RATE_LIMIT) {
-			rl_key = r.exp_match.limiter_id;
+			rl_key = r.limiter_id;
 			err = bpf_map_delete_elem(rl_map_fd, &rl_key);
 			if (err) {
 				err = -errno;
@@ -1448,7 +1448,7 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 	}
 
 	// Handle jump action
-	if (new_r.rule_action.action == RL_JUMP) {
+	if (new_r.action == RL_JUMP) {
 		struct chain goto_c;
 		int goto_key;
 		err = get_chain_by_name(goto_chain, c_map_fd, &goto_c, &goto_key);
@@ -1462,7 +1462,7 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 			err = EXIT_FAILURE;
 			goto out;
 		}
-		new_r.rule_action.goto_id = goto_key;
+		new_r.goto_id = goto_key;
 	}
 
 	// Handle rate limiter
@@ -1474,7 +1474,7 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 			goto out;
 		}
 		pr_debug("Found rate limiter map with fd %d for map id %d\n", rl_map_fd, rl_info.id);
-		rl_key = old_r.exp_match.limiter_id;
+		rl_key = old_r.limiter_id;
 
 		if (new_r.match_field_flags & MATCH_RATE_LIMIT) {
 			// Update rate limiter
@@ -1542,7 +1542,7 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 					err = EXIT_FAILURE;
 					goto out;
 				}
-				new_r.exp_match.limiter_id = rl_key;
+				new_r.limiter_id = rl_key;
 				pr_debug("Rate limiter: rate_limit=%llu, bucket_size=%llu, tokens=%llu, type=%d, enabled=%d\n",
 					new_rl.rate_limit, new_rl.bucket_size, new_rl.tokens, new_rl.type, new_rl.enabled);
 			}
@@ -1647,14 +1647,14 @@ static int print_chain(struct chain *c, int c_map_fd, int st_map_fd) {
 			strcat(proto, "ipv4,");
 			if (r->match_field_flags & MATCH_SRC_ADDR) {
 				char src_ip_mask[INET_ADDRSTRLEN];
-				inet_ntop(AF_INET, &r->hdr_match.src_ip.ipv4.addr, src_ip, sizeof(src_ip));
-				snprintf(src_ip_mask, sizeof(src_ip_mask), "/%d", __builtin_popcount(r->hdr_match.src_ip.ipv4.mask));
+				inet_ntop(AF_INET, &r->src_ip.ipv4.addr, src_ip, sizeof(src_ip));
+				snprintf(src_ip_mask, sizeof(src_ip_mask), "/%d", __builtin_popcount(r->src_ip.ipv4.mask));
 				strcat(src_ip, src_ip_mask);
 			}
 			if (r->match_field_flags & MATCH_DST_ADDR) {
 				char dst_ip_mask[INET_ADDRSTRLEN];
-				inet_ntop(AF_INET, &r->hdr_match.dst_ip.ipv4.addr, dst_ip, sizeof(dst_ip));
-				snprintf(dst_ip_mask, sizeof(dst_ip_mask), "/%d", __builtin_popcount(r->hdr_match.dst_ip.ipv4.mask));
+				inet_ntop(AF_INET, &r->dst_ip.ipv4.addr, dst_ip, sizeof(dst_ip));
+				snprintf(dst_ip_mask, sizeof(dst_ip_mask), "/%d", __builtin_popcount(r->dst_ip.ipv4.mask));
 				strcat(dst_ip, dst_ip_mask);
 			}
 		} 
@@ -1663,14 +1663,14 @@ static int print_chain(struct chain *c, int c_map_fd, int st_map_fd) {
 			strcat(proto, "ipv6,");
 			if (r->match_field_flags & MATCH_SRC_ADDR) {
 				char src_ip_mask[INET6_ADDRSTRLEN];
-				inet_ntop(AF_INET6, &r->hdr_match.src_ip.ipv6.addr, src_ip, sizeof(src_ip));
-				snprintf(src_ip_mask, sizeof(src_ip_mask), "/%d", __builtin_popcountll(*(uint64_t *)&r->hdr_match.src_ip.ipv6.mask[0]) + __builtin_popcountll(*(uint64_t *)&r->hdr_match.src_ip.ipv6.mask[8]));
+				inet_ntop(AF_INET6, &r->src_ip.ipv6.addr, src_ip, sizeof(src_ip));
+				snprintf(src_ip_mask, sizeof(src_ip_mask), "/%d", __builtin_popcountll(*(uint64_t *)&r->src_ip.ipv6.mask[0]) + __builtin_popcountll(*(uint64_t *)&r->src_ip.ipv6.mask[8]));
 				strcat(src_ip, src_ip_mask);
 			}
 			if (r->match_field_flags & MATCH_DST_ADDR) {
 				char dst_ip_mask[INET6_ADDRSTRLEN];
-				inet_ntop(AF_INET6, &r->hdr_match.dst_ip.ipv6.addr, dst_ip, sizeof(dst_ip));
-				snprintf(dst_ip_mask, sizeof(dst_ip_mask), "/%d", __builtin_popcountll(*(uint64_t *)&r->hdr_match.dst_ip.ipv6.mask[0]) + __builtin_popcountll(*(uint64_t *)&r->hdr_match.dst_ip.ipv6.mask[8]));
+				inet_ntop(AF_INET6, &r->dst_ip.ipv6.addr, dst_ip, sizeof(dst_ip));
+				snprintf(dst_ip_mask, sizeof(dst_ip_mask), "/%d", __builtin_popcountll(*(uint64_t *)&r->dst_ip.ipv6.mask[0]) + __builtin_popcountll(*(uint64_t *)&r->dst_ip.ipv6.mask[8]));
 				strcat(dst_ip, dst_ip_mask);
 			}
 		}
@@ -1692,34 +1692,34 @@ static int print_chain(struct chain *c, int c_map_fd, int st_map_fd) {
 		} 
 
 		if (r->match_field_flags & MATCH_SPORT) {
-			snprintf(detail + strlen(detail), sizeof(detail) - strlen(detail), " sport:%d", ntohs(r->hdr_match.sport));
+			snprintf(detail + strlen(detail), sizeof(detail) - strlen(detail), " sport:%d", ntohs(r->sport));
 		}
 		if (r->match_field_flags & MATCH_DPORT) {
-			snprintf(detail + strlen(detail), sizeof(detail) - strlen(detail), " dport:%d", ntohs(r->hdr_match.dport));
+			snprintf(detail + strlen(detail), sizeof(detail) - strlen(detail), " dport:%d", ntohs(r->dport));
 		}
 		if (r->match_field_flags & MATCH_TCP_FLAGS) {
 			snprintf(detail + strlen(detail), sizeof(detail) - strlen(detail), " tcp_flags:");
-			if (r->hdr_match.tcp_flags & TCP_FLAG_SYN) strcat(detail, "SYN,");
-			if (r->hdr_match.tcp_flags & TCP_FLAG_ACK) strcat(detail, "ACK,");
-			if (r->hdr_match.tcp_flags & TCP_FLAG_FIN) strcat(detail, "FIN,");
-			if (r->hdr_match.tcp_flags & TCP_FLAG_URG) strcat(detail, "URG,");
-			if (r->hdr_match.tcp_flags & TCP_FLAG_PSH) strcat(detail, "PSH,");
-			if (r->hdr_match.tcp_flags & TCP_FLAG_RST) strcat(detail, "RST,");
-			if (r->hdr_match.tcp_flags & TCP_FLAG_ECE) strcat(detail, "ECE,");
-			if (r->hdr_match.tcp_flags & TCP_FLAG_CWR) strcat(detail, "CWR,");
+			if (r->tcp_flags & TCP_FLAG_SYN) strcat(detail, "SYN,");
+			if (r->tcp_flags & TCP_FLAG_ACK) strcat(detail, "ACK,");
+			if (r->tcp_flags & TCP_FLAG_FIN) strcat(detail, "FIN,");
+			if (r->tcp_flags & TCP_FLAG_URG) strcat(detail, "URG,");
+			if (r->tcp_flags & TCP_FLAG_PSH) strcat(detail, "PSH,");
+			if (r->tcp_flags & TCP_FLAG_RST) strcat(detail, "RST,");
+			if (r->tcp_flags & TCP_FLAG_ECE) strcat(detail, "ECE,");
+			if (r->tcp_flags & TCP_FLAG_CWR) strcat(detail, "CWR,");
 			if (detail[strlen(detail) - 1] == ',') detail[strlen(detail) - 1] = '\0';
 		}
 		if (r->match_field_flags & MATCH_ICMP_TYPE) {
-			snprintf(detail + strlen(detail), sizeof(detail) - strlen(detail), " icmp_type:%d", r->hdr_match.icmp_type);
+			snprintf(detail + strlen(detail), sizeof(detail) - strlen(detail), " icmp_type:%d", r->icmp_type);
 		}
 		if (r->match_field_flags & MATCH_ICMP_CODE) {
-			snprintf(detail + strlen(detail), sizeof(detail) - strlen(detail), " icmp_code:%d", r->hdr_match.icmp_code);
+			snprintf(detail + strlen(detail), sizeof(detail) - strlen(detail), " icmp_code:%d", r->icmp_code);
 		}
 
 		char *action;
 		struct chain goto_c;
 		int goto_key;
-		switch (r->rule_action.action) {
+		switch (r->action) {
 		case RL_ACCEPT:
 			action = "ACCEPT";
 			break;
@@ -1727,7 +1727,7 @@ static int print_chain(struct chain *c, int c_map_fd, int st_map_fd) {
 			action = "DROP";
 			break;
 		case RL_JUMP:
-			goto_key = r->rule_action.goto_id;
+			goto_key = r->goto_id;
 			err = bpf_map_lookup_elem(c_map_fd, &goto_key, &goto_c);
 			if (err) {
 				strcat(action, "UNKNOWN");
@@ -1809,38 +1809,38 @@ out:
 // 	if (r->match_field_flags & MATCH_IPV4) {
 // 		buf += sprintf(buf, "l3_proto=ipv4,");
 // 		if (r->match_field_flags & MATCH_SRC_ADDR)
-// 			buf += sprintf(buf, "saddr=%s/%d,", inet_ntoa(*(struct in_addr *)&r->hdr_match.src_ip.ipv4.addr),__builtin_popcount(r->hdr_match.src_ip.ipv4.mask));
+// 			buf += sprintf(buf, "saddr=%s/%d,", inet_ntoa(*(struct in_addr *)&r->src_ip.ipv4.addr),__builtin_popcount(r->src_ip.ipv4.mask));
 // 		if (r->match_field_flags & MATCH_DST_ADDR)
-// 			buf += sprintf(buf, "daddr=%s/%d,", inet_ntoa(*(struct in_addr *)&r->hdr_match.dst_ip.ipv4.addr),__builtin_popcount(r->hdr_match.src_ip.ipv4.mask));
+// 			buf += sprintf(buf, "daddr=%s/%d,", inet_ntoa(*(struct in_addr *)&r->dst_ip.ipv4.addr),__builtin_popcount(r->src_ip.ipv4.mask));
 // 	} else if (r->match_field_flags & MATCH_IPV6) {
 // 		buf += sprintf(buf, "l3_proto=ipv6,");
 // 		if (r->match_field_flags & MATCH_SRC_ADDR) {
 // 			char src_ip[INET6_ADDRSTRLEN];
-// 			inet_ntop(AF_INET6, &r->hdr_match.src_ip.ipv6.addr, src_ip, sizeof(src_ip));
-// 			buf += sprintf(buf, "saddr=%s/%d,", src_ip, __builtin_popcountll(*(uint64_t *)&r->hdr_match.src_ip.ipv6.mask[0]) + __builtin_popcountll(*(uint64_t *)&r->hdr_match.src_ip.ipv6.mask[8]));
+// 			inet_ntop(AF_INET6, &r->src_ip.ipv6.addr, src_ip, sizeof(src_ip));
+// 			buf += sprintf(buf, "saddr=%s/%d,", src_ip, __builtin_popcountll(*(uint64_t *)&r->src_ip.ipv6.mask[0]) + __builtin_popcountll(*(uint64_t *)&r->src_ip.ipv6.mask[8]));
 // 		}
 // 		if (r->match_field_flags & MATCH_DST_ADDR) {
 // 			char dst_ip[INET6_ADDRSTRLEN];
-// 			inet_ntop(AF_INET6, &r->hdr_match.dst_ip.ipv6.addr, dst_ip, sizeof(dst_ip));
-// 			buf += sprintf(buf, "daddr=%s/%d,", dst_ip, __builtin_popcountll(*(uint64_t *)&r->hdr_match.src_ip.ipv6.mask[0]) + __builtin_popcountll(*(uint64_t *)&r->hdr_match.src_ip.ipv6.mask[8]));
+// 			inet_ntop(AF_INET6, &r->dst_ip.ipv6.addr, dst_ip, sizeof(dst_ip));
+// 			buf += sprintf(buf, "daddr=%s/%d,", dst_ip, __builtin_popcountll(*(uint64_t *)&r->src_ip.ipv6.mask[0]) + __builtin_popcountll(*(uint64_t *)&r->src_ip.ipv6.mask[8]));
 // 		}
 // 	}
 // 	if (r->match_field_flags & MATCH_TCP) {
 // 		buf += sprintf(buf, "l4_proto=tcp,");
 // 		if (r->match_field_flags & MATCH_SPORT)
-// 			buf += sprintf(buf, "sport=%d,", ntohs(r->hdr_match.sport));
+// 			buf += sprintf(buf, "sport=%d,", ntohs(r->sport));
 // 		if (r->match_field_flags & MATCH_DPORT)
-// 			buf += sprintf(buf, "dport=%d,", ntohs(r->hdr_match.dport));
+// 			buf += sprintf(buf, "dport=%d,", ntohs(r->dport));
 // 		if (r->match_field_flags & MATCH_TCP_FLAGS) {
 // 			char tcp_flags[35];
-// 			if (r->hdr_match.tcp_flags & TCP_FLAG_SYN) strcat(tcp_flags, "SYN|");
-// 			if (r->hdr_match.tcp_flags & TCP_FLAG_ACK) strcat(tcp_flags, "ACK|");
-// 			if (r->hdr_match.tcp_flags & TCP_FLAG_FIN) strcat(tcp_flags, "FIN|");
-// 			if (r->hdr_match.tcp_flags & TCP_FLAG_URG) strcat(tcp_flags, "URG|");
-// 			if (r->hdr_match.tcp_flags & TCP_FLAG_PSH) strcat(tcp_flags, "PSH|");
-// 			if (r->hdr_match.tcp_flags & TCP_FLAG_RST) strcat(tcp_flags, "RST|");
-// 			if (r->hdr_match.tcp_flags & TCP_FLAG_ECE) strcat(tcp_flags, "ECE|");
-// 			if (r->hdr_match.tcp_flags & TCP_FLAG_CWR) strcat(tcp_flags, "CWR|");
+// 			if (r->tcp_flags & TCP_FLAG_SYN) strcat(tcp_flags, "SYN|");
+// 			if (r->tcp_flags & TCP_FLAG_ACK) strcat(tcp_flags, "ACK|");
+// 			if (r->tcp_flags & TCP_FLAG_FIN) strcat(tcp_flags, "FIN|");
+// 			if (r->tcp_flags & TCP_FLAG_URG) strcat(tcp_flags, "URG|");
+// 			if (r->tcp_flags & TCP_FLAG_PSH) strcat(tcp_flags, "PSH|");
+// 			if (r->tcp_flags & TCP_FLAG_RST) strcat(tcp_flags, "RST|");
+// 			if (r->tcp_flags & TCP_FLAG_ECE) strcat(tcp_flags, "ECE|");
+// 			if (r->tcp_flags & TCP_FLAG_CWR) strcat(tcp_flags, "CWR|");
 // 			if (tcp_flags[strlen(tcp_flags) - 1] == '|') tcp_flags[strlen(tcp_flags) - 1] = '\0';
 // 			buf += sprintf(buf, "tcp_flags=%s,", tcp_flags);
 // 		}
@@ -1848,43 +1848,43 @@ out:
 // 	if (r->match_field_flags & MATCH_UDP) { 
 // 		buf += sprintf(buf, "l4_proto=udp,");
 // 		if (r->match_field_flags & MATCH_SPORT)
-// 			buf += sprintf(buf, "sport=%d,", ntohs(r->hdr_match.sport));
+// 			buf += sprintf(buf, "sport=%d,", ntohs(r->sport));
 // 		if (r->match_field_flags & MATCH_DPORT)
-// 			buf += sprintf(buf, "dport=%d,", ntohs(r->hdr_match.dport));
+// 			buf += sprintf(buf, "dport=%d,", ntohs(r->dport));
 // 	} 
 // 	if (r->match_field_flags & MATCH_ICMP) {
 // 		buf += sprintf(buf, "l4_proto=icmp,");
 // 		if (r->match_field_flags & MATCH_ICMP_TYPE)
-// 			buf += sprintf(buf, "icmp_type=%d,", r->hdr_match.icmp_type);
+// 			buf += sprintf(buf, "icmp_type=%d,", r->icmp_type);
 // 		if (r->match_field_flags & MATCH_ICMP_CODE)
-// 			buf += sprintf(buf, "icmp_code=%d,", r->hdr_match.icmp_code);
+// 			buf += sprintf(buf, "icmp_code=%d,", r->icmp_code);
 // 	}
 // 	if (r->match_field_flags & MATCH_ICMPV6) {
 // 		buf += sprintf(buf, "l4_proto=icmpv6,");
 // 		if (r->match_field_flags & MATCH_ICMP_TYPE)
-// 			buf += sprintf(buf, "icmp_type=%d,", r->hdr_match.icmp_type);
+// 			buf += sprintf(buf, "icmp_type=%d,", r->icmp_type);
 // 		if (r->match_field_flags & MATCH_ICMP_CODE)
-// 			buf += sprintf(buf, "icmp_code=%d,", r->hdr_match.icmp_code);
+// 			buf += sprintf(buf, "icmp_code=%d,", r->icmp_code);
 // 	}
 // 	if (r->match_field_flags & MATCH_RATE_LIMIT) {
 // 		char limit_type[10];
 // 		if (rl->type == LIMIT_PPS) {
 // 			strcpy(limit_type, "pps");
-// 		} else if (r->exp_match.limiter.type == LIMIT_BPS) {
+// 		} else if (r->limiter.type == LIMIT_BPS) {
 // 			strcpy(limit_type, "bps");
 // 		} 
 // 		buf += sprintf(buf, "limit=%llu|%llu|%s,", rl->rate_limit, rl->bucket_size, limit_type);
 // 	}
 
 // 	// Handle rule action
-// 	if (r->rule_action.action == RL_DROP) {
+// 	if (r->action == RL_DROP) {
 // 		buf += sprintf(buf, "action=drop");
-// 	} else if (r->rule_action.action == RL_ACCEPT) {
+// 	} else if (r->action == RL_ACCEPT) {
 // 		buf += sprintf(buf, "action=accept");
-// 	} else if (r->rule_action.action == RL_JUMP) {
+// 	} else if (r->action == RL_JUMP) {
 // 		int err;
 // 		struct chain goto_c;
-// 		err = bpf_map_lookup_elem(c_map_fd, &r->rule_action.goto_id, &goto_c);
+// 		err = bpf_map_lookup_elem(c_map_fd, &r->goto_id, &goto_c);
 // 		buf += sprintf(buf, "goto=%s", goto_chain);
 // 	}
 // }

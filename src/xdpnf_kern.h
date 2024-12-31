@@ -313,73 +313,84 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
         for (__u16 i = 0; i < MAX_RULES_PER_CHAIN; i++) {
 			struct rule *r = &c->rule_list[i];
 
-			if (r->match_field_flags == 0)
+			__u32 match_field_flags = c->rule_list[i].match_field_flags;
+			
+			bpf_printk("Processing rule %d\n", i);
+			bpf_printk("Match field flags: 0x%X\n", match_field_flags);
+			bpf_printk("Protocol: %d\n", pkt_hdrs->match_field_flags);
+
+			if (!match_field_flags)
 				break;
 			
-			__u32 match_hdr_fields;
-			match_hdr_fields = pkt_hdrs->match_field_flags & r->match_field_flags;
-
-			// Check protocol match
-			if ((match_hdr_fields & MATCH_PROTOCOL) != (r->match_field_flags & MATCH_PROTOCOL))
+			if ((pkt_hdrs->match_field_flags & match_field_flags & MATCH_PROTOCOL) != (match_field_flags & MATCH_PROTOCOL))
 				continue;
 			
 			// Check IPv4 addr match
-			if ((r->match_field_flags & (MATCH_SRC_ADDR|MATCH_IPV4))) {
-				bpf_printk("Matching ipv4 src addr\n");
-				__u32 check = ((pkt_hdrs->hdr_match.src_ip.ipv4.addr ^ r->hdr_match.src_ip.ipv4.addr) & r->hdr_match.src_ip.ipv4.mask);
+			if ((match_field_flags & MATCH_SRC_ADDR) && (match_field_flags & MATCH_IPV4)) {
+				__u32 check = (pkt_hdrs->src_ip.ipv4.addr ^ r->src_ip.ipv4.addr) & r->src_ip.ipv4.mask;
 				if (check)
 					continue;
 			}
-			if ((r->match_field_flags & (MATCH_DST_ADDR|MATCH_IPV4))) {
+			if ((match_field_flags & MATCH_DST_ADDR) && (match_field_flags & MATCH_IPV4)) {
 				bpf_printk("Matching ipv4 dst addr\n");
-				__u32 check = ((pkt_hdrs->hdr_match.dst_ip.ipv4.addr ^ r->hdr_match.dst_ip.ipv4.addr) & r->hdr_match.dst_ip.ipv4.mask);
+				__u32 check = (pkt_hdrs->dst_ip.ipv4.addr ^ r->dst_ip.ipv4.addr) & r->dst_ip.ipv4.mask;
 				if (check)
 					continue;
 			}
 
-			// Check IPv6 addr match
-			if (r->match_field_flags & (MATCH_SRC_ADDR|MATCH_IPV6)) {
+			// Check src addr match
+			if ((match_field_flags & MATCH_SRC_ADDR) && (match_field_flags & MATCH_IPV6)) {
 				bpf_printk("Matching ipv6 src addr\n");
-				__u8 check;
-				for (int i = 0; i < IPV6_ADDR_LEN; i++) {
-					if (!((pkt_hdrs->hdr_match.src_ip.ipv6.addr[i]^r->hdr_match.src_ip.ipv6.addr[i]) & r->hdr_match.src_ip.ipv6.mask[i])) 
-						check = FALSE;
+				__u8 i = 0;
+				for (i = 0; i < IPV6_ADDR_LEN; i += 8) {
+					__u64 check = ( ((__u64 *)pkt_hdrs->src_ip.ipv6.addr)[i] ^ ((__u64 *)r->src_ip.ipv6.addr)[i] ) & ((__u64 *)r->src_ip.ipv6.mask)[i];
+					
+					// bpf_printk("check: %llu\n", check);
+					if (check) 
+					{
+						// bpf_printk("check false at i: %d\n", i);
+						// bpf_printk("pkt src ip: %llX\n", ((__u64 *)pkt_hdrs->src_ip.ipv6.addr)[i]);
+						// bpf_printk("rule src ip: %llX\n", ((__u64 *)r->src_ip.ipv6.addr)[i]);
+						// bpf_printk("rule src mask: %llX\n", ((__u64 *)r->src_ip.ipv6.mask)[i]);
 						break;
+					}
 				}
-				if (check)
+				if (i < IPV6_ADDR_LEN)
 					continue;
 		    }
 			
-			if ((r->match_field_flags & (MATCH_DST_ADDR|MATCH_IPV6))) {
-				__u8 check;
-				for (int i = 0; i < IPV6_ADDR_LEN; i++) {
-					if (!((pkt_hdrs->hdr_match.dst_ip.ipv6.addr[i]^r->hdr_match.dst_ip.ipv6.addr[i]) & r->hdr_match.dst_ip.ipv6.mask[i])) 
-						check = FALSE;
+			if ((match_field_flags & MATCH_DST_ADDR) && (match_field_flags & MATCH_IPV6)) {
+				__u8 i = 0;
+				for (i = 0; i < IPV6_ADDR_LEN; i += 8) {
+					__u64 check = ( ((__u64 *)pkt_hdrs->dst_ip.ipv6.addr)[i] ^ ((__u64 *)r->dst_ip.ipv6.addr)[i] ) & ((__u64 *)r->dst_ip.ipv6.mask)[i];
+					if (check)
+					{
 						break;
+					}
 				}
-				if (check)
+				if (i < IPV6_ADDR_LEN)
 					continue;
 			}
 
 			// Check ICMP match
-			if ((r->match_field_flags & MATCH_ICMP_CODE) && (pkt_hdrs->hdr_match.icmp_code != r->hdr_match.icmp_code))
+			if ((match_field_flags & MATCH_ICMP_CODE) && (pkt_hdrs->icmp_code != r->icmp_code))
 				continue;
-			if ((r->match_field_flags & MATCH_ICMP_TYPE) && (pkt_hdrs->hdr_match.icmp_type != r->hdr_match.icmp_type))
+			if ((match_field_flags & MATCH_ICMP_TYPE) && (pkt_hdrs->icmp_type != r->icmp_type))
 				continue;
                 
 			// Check port match	
-			if ((r->match_field_flags & MATCH_SPORT) && (pkt_hdrs->hdr_match.sport != r->hdr_match.sport))
+			if ((match_field_flags & MATCH_SPORT) && (pkt_hdrs->sport != r->sport))
 				continue;
-			if ((r->match_field_flags & MATCH_DPORT) && (pkt_hdrs->hdr_match.dport != r->hdr_match.dport))
+			if ((match_field_flags & MATCH_DPORT) && (pkt_hdrs->dport != r->dport))
 				continue;
 
 			// Check TCP flags match
-			if ((r->match_field_flags & MATCH_TCP_FLAGS) && ((pkt_hdrs->hdr_match.tcp_flags & r->hdr_match.tcp_flags) != r->hdr_match.tcp_flags))
+			if ((match_field_flags & MATCH_TCP_FLAGS) && ((pkt_hdrs->tcp_flags & r->tcp_flags) != r->tcp_flags))
 				continue;
 
 			// Check rate limit
-            if (r->match_field_flags & MATCH_RATE_LIMIT) {
-                struct rate_limiter *rl = bpf_map_lookup_elem(&limiters_map, &r->exp_match.limiter_id);
+            if (match_field_flags & MATCH_RATE_LIMIT) {
+                struct rate_limiter *rl = bpf_map_lookup_elem(&limiters_map, &r->limiter_id);
                 if (rl) {
                     __u64 now, delta;
                     now = bpf_ktime_get_ns();
@@ -394,29 +405,31 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
                     if (delta >= 0) 
                         rl->tokens = delta;
 
-                    bpf_map_update_elem(&limiters_map, &r->exp_match.limiter_id, c, BPF_ANY);
+                    bpf_map_update_elem(&limiters_map, &r->limiter_id, c, BPF_ANY);
                 } else {
                     continue;
                 }
             }
 
+			bpf_printk("Matched rule, do action %d\n", r->action);
 			// Update stats
 			struct rule_stats *rs = bpf_map_lookup_elem(&stats_map, &r->stats_id);
+			// bpf_printk("Stats id: %d\n", r->stats_id);
 			if (rs) {
-				rs->bytes = 0;
-				rs->packets = 0;
+				rs->bytes += pkt_len;
+				rs->packets++;
 				bpf_map_update_elem(&stats_map, &r->stats_id, rs, BPF_ANY);
 			}
 
-            switch (r->rule_action.action) {
+            switch (r->action) {
             case RL_ABORTED:
             case RL_DROP:
             case RL_ACCEPT:
             case RL_TX:
             case RL_REDIRECT:
-                return r->rule_action.action;
+                return r->action;
             case RL_JUMP:
-                chain_id = r->rule_action.goto_id;
+                chain_id = r->goto_id;
                 goto next_chain; 
             default:
                 break;

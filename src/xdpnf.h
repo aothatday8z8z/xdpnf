@@ -92,13 +92,13 @@ struct ipv6_addr {
 };
 
 enum rule_action {
-    RL_ABORTED = 0,            // Abort processing
-	RL_DROP = 1,             // Drop the packet
-	RL_ACCEPT = 2,           // Pass packet out from xdp processing to kernel processing
-	RL_TX = 3,               // Send packet to interface which it came from
-	RL_REDIRECT = 4,         // Send packet to another interface
-    RL_JUMP= 5,              // Jump to another chain
-    RL_RETURN = 6            // Return to parent chain or do ACCEPT action if no parent chain
+    RL_ABORTED = 0,     // Abort processing
+	RL_DROP,            // Drop the packet
+	RL_ACCEPT,          // Pass packet out from xdp processing to kernel processing
+	RL_TX,              // Send packet to interface which it came from
+	RL_REDIRECT,        // Send packet to another interface
+    RL_JUMP,            // Jump to another chain
+    RL_RETURN,          // Return to parent chain or do ACCEPT action if no parent chain
 };
 
 struct header_match {
@@ -145,11 +145,29 @@ struct action {
 
 struct rule
 {
+    union {
+        struct ipv4_addr ipv4;
+        struct ipv6_addr ipv6;
+    } src_ip;
+
+    union {
+        struct ipv4_addr ipv4;
+        struct ipv6_addr ipv6;
+    } dst_ip;
+
+    __u32 tcp_flags;
     __u32 stats_id;
     __u32 match_field_flags;
-    struct header_match hdr_match;
-    struct explicit_match exp_match;
-    struct action rule_action;
+     enum rule_action action;
+     
+    // __s8 tos;
+    __u16 sport;
+    __u16 dport;
+    __u16 limiter_id; 
+
+    __u8 icmp_type;
+    __u8 icmp_code;
+    __u8 goto_id;
 };
 
 // TODO: redesign chain structure 
