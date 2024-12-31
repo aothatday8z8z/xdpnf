@@ -39,7 +39,7 @@ int xdpnf_kern_main(struct xdp_md *ctx)
 	enum rule_action action = RL_ACCEPT; /* Default action */
 	struct hdr_cursor nh;
     struct rule rule_hdrs;
-    rule_hdrs.match_field_flags = 0;
+    __builtin_memset(&rule_hdrs, 0, sizeof(rule_hdrs));
     struct ethhdr *ethhdr;
 	int eth_type, ip_type;
 
@@ -52,15 +52,15 @@ int xdpnf_kern_main(struct xdp_md *ctx)
         struct iphdr *iphdr;
 		ip_type = parse_iphdr(&nh, data_end, &iphdr);
 		CHECK_RET(ip_type);
-        rule_hdrs.hdr_match.src_ip.ipv4.addr = iphdr->saddr;
-        rule_hdrs.hdr_match.dst_ip.ipv4.addr = iphdr->daddr;
+        rule_hdrs.src_ip.ipv4.addr = iphdr->saddr;
+        rule_hdrs.dst_ip.ipv4.addr = iphdr->daddr;
         rule_hdrs.match_field_flags |= MATCH_IPV4;
         if (ip_type == IPPROTO_ICMP)
         {
             struct icmphdr_common *icmphdr;
             CHECK_RET(parse_icmphdr_common(&nh, data_end, &icmphdr));
-            rule_hdrs.hdr_match.icmp_code = icmphdr->code;
-            rule_hdrs.hdr_match.icmp_type = icmphdr->type;
+            rule_hdrs.icmp_code = icmphdr->code;
+            rule_hdrs.icmp_type = icmphdr->type;
             rule_hdrs.match_field_flags |= MATCH_ICMP;
             goto match_rule;
         }
@@ -70,15 +70,15 @@ int xdpnf_kern_main(struct xdp_md *ctx)
         struct ipv6hdr *ipv6hdr;
 		ip_type = parse_ip6hdr(&nh, data_end, &ipv6hdr);
 		CHECK_RET(ip_type);
-        memcpy(&rule_hdrs.hdr_match.src_ip.ipv6.addr, &ipv6hdr->saddr, IPV6_ADDR_LEN);
-        memcpy(&rule_hdrs.hdr_match.dst_ip.ipv6.addr, &ipv6hdr->daddr, IPV6_ADDR_LEN);
+        memcpy(&rule_hdrs.src_ip.ipv6.addr, &ipv6hdr->saddr, IPV6_ADDR_LEN);
+        memcpy(&rule_hdrs.dst_ip.ipv6.addr, &ipv6hdr->daddr, IPV6_ADDR_LEN);
         rule_hdrs.match_field_flags |= MATCH_IPV6;
         if (ip_type == IPPROTO_ICMPV6)
         {
             struct icmphdr_common *icmpv6hdr;
             CHECK_RET(parse_icmphdr_common(&nh, data_end, &icmpv6hdr));
-            rule_hdrs.hdr_match.icmp_code = icmpv6hdr->code;
-            rule_hdrs.hdr_match.icmp_type = icmpv6hdr->type;
+            rule_hdrs.icmp_code = icmpv6hdr->code;
+            rule_hdrs.icmp_type = icmpv6hdr->type;
             rule_hdrs.match_field_flags |= MATCH_ICMPV6;
             goto match_rule;
         }
@@ -93,17 +93,17 @@ int xdpnf_kern_main(struct xdp_md *ctx)
     {
         struct udphdr *udphdr;
 		CHECK_RET(parse_udphdr(&nh, data_end, &udphdr));
-        rule_hdrs.hdr_match.sport = udphdr->source;
-        rule_hdrs.hdr_match.dport = udphdr->dest;
+        rule_hdrs.sport = udphdr->source;
+        rule_hdrs.dport = udphdr->dest;
         rule_hdrs.match_field_flags |= MATCH_UDP;
     }
     else if (ip_type == IPPROTO_TCP) 
     {
         struct tcphdr *tcphdr;
         CHECK_RET(parse_tcphdr(&nh, data_end, &tcphdr));
-        rule_hdrs.hdr_match.sport = tcphdr->source;
-        rule_hdrs.hdr_match.dport = tcphdr->dest;
-        rule_hdrs.hdr_match.tcp_flags = (tcphdr->syn | tcphdr->fin | tcphdr->rst | tcphdr->psh | tcphdr->ack | tcphdr->urg);
+        rule_hdrs.sport = tcphdr->source;
+        rule_hdrs.dport = tcphdr->dest;
+        rule_hdrs.tcp_flags = (tcphdr->syn | tcphdr->fin | tcphdr->rst | tcphdr->psh | tcphdr->ack | tcphdr->urg);
         rule_hdrs.match_field_flags |= MATCH_TCP;  
     }
     else 
