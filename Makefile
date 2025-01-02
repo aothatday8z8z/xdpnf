@@ -1,7 +1,19 @@
-CC = clang
-LLC = llc
+CC := $(shell which clang-16 || which clang-15 || which clang-14 || which clang-13 || which clang-12 || which clang-11 || which clang)
+LLC := $(shell which llc-16 || which llc-15 || which llc-14 || which llc-13 || which llc-12 || which llc-11 || which llc)
 
 ARCH := $(shell uname -m | sed 's/x86_64/x86/')
+
+# Check clang version
+CLANG_VERSION := $(shell echo $(CC) | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+ifeq ($(shell [ $(CLANG_VERSION) -lt 11 ] && echo true), true)
+$(error Clang version must be 11 or higher. Current version: $(CLANG_VERSION))
+endif
+
+# Check llc version
+LLC_VERSION := $(shell echo $(LLC) | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+ifeq ($(shell [ $(LLC_VERSION) -lt 11 ] && echo true), true)
+$(error LLC version must be 11 or higher. Current version: $(LLC_VERSION))
+endif
 
 # Main directories
 BUILDDIR = build
@@ -58,7 +70,7 @@ xdpnf: utils libs $(UTIL_OBJECTS)
 xdpnf_kern: $(XDPPROGSRC)
 	mkdir -p $(BUILDDIR)
 	$(CC) $(INCS_KERN) -D__BPF__ -D__BPF_TRACING__ -Wno-unused-value \
-	    -Wno-pointer-sign -Wno-compare-distinct-pointer-types -O3 -emit-llvm -c -g \
+	    -Wno-pointer-sign -Wno-compare-distinct-pointer-types -O2 -emit-llvm -c -g \
 	    -o $(BUILDDIR)/xdpnf_kern.ll $<
 	$(LLC) -march=bpf -filetype=obj -o $(XDPPROGOBJ) $(BUILDDIR)/xdpnf_kern.ll
 
