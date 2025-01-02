@@ -309,15 +309,10 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
         if (!c)
             return RL_ABORTED;
 
-		bpf_printk("Processing chain %d\n", chain_id);
         for (__u16 i = 0; i < MAX_RULES_PER_CHAIN; i++) {
 			struct rule *r = &c->rule_list[i];
 
 			__u32 match_field_flags = c->rule_list[i].match_field_flags;
-			
-			bpf_printk("Processing rule %d\n", i);
-			bpf_printk("Match field flags: 0x%X\n", match_field_flags);
-			bpf_printk("Protocol: %d\n", pkt_hdrs->match_field_flags);
 
 			if (!match_field_flags)
 				break;
@@ -327,6 +322,7 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 			
 			// Check IPv4 addr match
 			if ((match_field_flags & MATCH_SRC_ADDR) && (match_field_flags & MATCH_IPV4)) {
+				bpf_printk("Matching ipv4 src addr\n");
 				__u32 check = (pkt_hdrs->src_ip.ipv4.addr ^ r->src_ip.ipv4.addr) & r->src_ip.ipv4.mask;
 				if (check)
 					continue;
@@ -347,19 +343,14 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 					
 					// bpf_printk("check: %llu\n", check);
 					if (check) 
-					{
-						// bpf_printk("check false at i: %d\n", i);
-						// bpf_printk("pkt src ip: %llX\n", ((__u64 *)pkt_hdrs->src_ip.ipv6.addr)[i]);
-						// bpf_printk("rule src ip: %llX\n", ((__u64 *)r->src_ip.ipv6.addr)[i]);
-						// bpf_printk("rule src mask: %llX\n", ((__u64 *)r->src_ip.ipv6.mask)[i]);
 						break;
-					}
 				}
 				if (i < IPV6_ADDR_LEN)
 					continue;
 		    }
 			
 			if ((match_field_flags & MATCH_DST_ADDR) && (match_field_flags & MATCH_IPV6)) {
+				bpf_printk("Matching ipv6 dst addr\n");
 				__u8 i = 0;
 				for (i = 0; i < IPV6_ADDR_LEN; i += 8) {
 					__u64 check = ( ((__u64 *)pkt_hdrs->dst_ip.ipv6.addr)[i] ^ ((__u64 *)r->dst_ip.ipv6.addr)[i] ) & ((__u64 *)r->dst_ip.ipv6.mask)[i];
@@ -374,41 +365,63 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 
 			// Check ICMP match
 			if ((match_field_flags & MATCH_ICMP_CODE) && (pkt_hdrs->icmp_code != r->icmp_code))
+			{
+				bpf_printk("icmp code not matched\n");
 				continue;
+			}
 			if ((match_field_flags & MATCH_ICMP_TYPE) && (pkt_hdrs->icmp_type != r->icmp_type))
+			{
+				bpf_printk("icmp type not matched\n");
 				continue;
+			}
                 
 			// Check port match	
 			if ((match_field_flags & MATCH_SPORT) && (pkt_hdrs->sport != r->sport))
+			{
+				bpf_printk("sport not matched\n");
 				continue;
+			}
 			if ((match_field_flags & MATCH_DPORT) && (pkt_hdrs->dport != r->dport))
+			{
+				bpf_printk("dport not matched\n");
 				continue;
+			}
 
 			// Check TCP flags match
 			if ((match_field_flags & MATCH_TCP_FLAGS) && ((pkt_hdrs->tcp_flags & r->tcp_flags) != r->tcp_flags))
+			{
+				bpf_printk("tcp flags not matched.Pkt flags %X, rule flags%X\n", pkt_hdrs->tcp_flags, r->tcp_flags);
 				continue;
+			}
 
 			// Check rate limit
             if (match_field_flags & MATCH_RATE_LIMIT) {
                 struct rate_limiter *rl = bpf_map_lookup_elem(&limiters_map, &r->limiter_id);
-                if (rl) {
-                    __u64 now, delta;
-                    now = bpf_ktime_get_ns();
-                    rl->tokens += (now - rl->last_update) * rl->rate_limit;
-                    rl->last_update = now;
-                    if (rl->tokens > rl->bucket_size)
-                        rl->tokens = rl->bucket_size;
-                    if (rl->type == LIMIT_PPS)
-                        delta = rl->tokens - 1;
-                    else if (rl->type == LIMIT_BPS)
-                        delta = rl->tokens - pkt_len;
-                    if (delta >= 0) 
-                        rl->tokens = delta;
+                if (!rl) 
+					continue;
 
-                    bpf_map_update_elem(&limiters_map, &r->limiter_id, c, BPF_ANY);
-                } else {
-                    continue;
-                }
+				bpf_printk("Matching rate limit: limit %llu, burst %llu, tokens %llu, last_update %llu\n", rl->rate_limit, rl->bucket_size, rl->tokens, rl->last_update);
+				__u64 now, delta;
+				now = bpf_ktime_get_ns();
+				rl->tokens += (now - rl->last_update) * (rl->rate_limit/NANO_TO_SEC);
+				rl->last_update = now;
+				if (rl->tokens > rl->bucket_size)
+					rl->tokens = rl->bucket_size;
+				if (rl->type == LIMIT_PPS)
+					delta = rl->tokens - 1;
+				else if (rl->type == LIMIT_BPS)
+					delta = rl->tokens - pkt_len;
+
+				if (delta >= 0) {
+					rl->tokens = delta;
+					bpf_map_update_elem(&limiters_map, &r->limiter_id, c, BPF_ANY);
+					continue;
+				} else {
+					bpf_printk("Rate limit exceeded\n");
+					bpf_map_update_elem(&limiters_map, &r->limiter_id, c, BPF_ANY);
+				}
+
+				// bpf_map_update_elem(&limiters_map, &r->limiter_id, c, BPF_ANY);
             }
 
 			bpf_printk("Matched rule, do action %d\n", r->action);
@@ -435,7 +448,7 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
                 break;
             }
         }
-        return RL_ACCEPT;
+        return c->policy;
 
 next_chain:
         continue; 
