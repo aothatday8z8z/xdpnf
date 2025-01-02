@@ -305,7 +305,8 @@ static __always_inline int parse_tcphdr(struct hdr_cursor *nh,
 
 static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, __u32 chain_id) {
     for (int depth = 0; depth < MAX_CHAIN_DEPTH; depth++) {
-        struct chain *c= bpf_map_lookup_elem(&chains_map, &chain_id);
+        struct chain *c= NULL;
+		c = bpf_map_lookup_elem(&chains_map, &chain_id);
         if (!c)
             return RL_ABORTED;
 
@@ -396,12 +397,13 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 
 			// Check rate limit
             if (match_field_flags & MATCH_RATE_LIMIT) {
-                struct rate_limiter *rl = bpf_map_lookup_elem(&limiters_map, &r->limiter_id);
+                struct rate_limiter *rl = NULL;
+				rl = bpf_map_lookup_elem(&limiters_map, &r->limiter_id);
                 if (!rl) 
 					continue;
 
-				__u64 now;
-				__s64 delta;
+				__u64 now = 0;
+				__s64 delta = 0;
 				now = bpf_ktime_get_ns();
 				rl->tokens += (now - rl->last_update) * rl->rate_limit; 
 				rl->tokens = (rl->tokens > rl->bucket_size) ? (rl->bucket_size) : rl->tokens;
@@ -411,9 +413,9 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 				// bpf_printk("Current tokens: %llu\n", rl->tokens);
 				rl->last_update = now;
 				if (rl->type == LIMIT_PPS)
-					delta = rl->tokens - TOKEN_VALUE;
+					delta = (__s64)(rl->tokens - TOKEN_VALUE);
 				else if (rl->type == LIMIT_BPS)
-					delta = rl->tokens - pkt_len*TOKEN_VALUE;
+					delta = (__s64)(rl->tokens - pkt_len*TOKEN_VALUE);
 
 				if (delta >= 0) {
 					rl->tokens = delta;
@@ -427,7 +429,8 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 
 			bpf_printk("Matched rule, do action %d\n", r->action);
 			// Update stats
-			struct rule_stats *rs = bpf_map_lookup_elem(&stats_map, &r->stats_id);
+			struct rule_stats *rs = NULL;
+			rs = bpf_map_lookup_elem(&stats_map, &r->stats_id);
 			if (rs) {
 				rs->bytes += pkt_len;
 				rs->packets++;

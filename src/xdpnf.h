@@ -125,12 +125,11 @@ struct header_match {
 
 // Rate limiter based on token bucket algorithm
 struct rate_limiter {
+    enum limit_type type;
     __u64 last_update; 
     __u64 rate_limit;
     __u64 bucket_size; // = rate_limit * burst_size        
     __u64 tokens;
-    enum limit_type type;
-    __u8 enabled;
 };
 
 struct explicit_match {

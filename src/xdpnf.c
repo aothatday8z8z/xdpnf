@@ -19,7 +19,6 @@
 #include "params.h"
 #include "logging.h"
 #include "util.h"
-#include "stats.h"
 #include "xdpnf.h"
 
 #define PROG_NAME "xdpnf"
@@ -752,7 +751,7 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 			err = EXIT_FAILURE;
 			goto out;
 		}
-		rl.enabled = TRUE;
+
 		rl.last_update = 0;
 		rl.tokens = rl.bucket_size; // Initialize the bucket with full tokens
 		err = bpf_map_update_elem(rl_map_fd, &rl_key, &rl, BPF_ANY);
@@ -764,8 +763,8 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 		}
 		r.limiter_id = rl_key;
 	}
-	pr_debug("Rate limiter: rate_limit=%llu, bucket_size=%llu, tokens=%llu, type=%d, enabled=%d\n",
-		rl.rate_limit, rl.bucket_size, rl.tokens, rl.type, rl.enabled);
+	pr_debug("Rate limiter: rate_limit=%llu, bucket_size=%llu, tokens=%llu, type=%d\n",
+		rl.rate_limit, rl.bucket_size, rl.tokens, rl.type);
 
 
 	// Handle jump action
@@ -1485,7 +1484,6 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 			// Update rate limiter
 			new_rl.tokens = new_rl.bucket_size;
 			new_rl.last_update = 0;
-			new_rl.enabled = TRUE;
 			
 			err = bpf_map_update_elem(rl_map_fd, &rl_key, &new_rl, BPF_ANY);
 			if (err) {
@@ -1525,7 +1523,7 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 					err = EXIT_FAILURE;
 					goto out;
 				}
-				new_rl.enabled = TRUE;
+
 				new_rl.last_update = 0;
 				new_rl.tokens = new_rl.bucket_size;
 				err = bpf_map_update_elem(rl_map_fd, &rl_key, &new_rl, BPF_ANY);
@@ -1536,8 +1534,8 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 					goto out;
 				}
 				new_r.limiter_id = rl_key;
-				pr_debug("Rate limiter: rate_limit=%llu, bucket_size=%llu, tokens=%llu, type=%d, enabled=%d\n",
-					new_rl.rate_limit, new_rl.bucket_size, new_rl.tokens, new_rl.type, new_rl.enabled);
+				pr_debug("Rate limiter: rate_limit=%llu, bucket_size=%llu, tokens=%llu, type=%d\n",
+					new_rl.rate_limit, new_rl.bucket_size, new_rl.tokens, new_rl.type);
 			}
 	}
 	// Update rule stats

@@ -60,7 +60,7 @@ INCS_USER = -I /usr/include -I /usr/local/include -I modules/xdp-tools/lib/libbp
 all: xdpnf xdpnf_kern utils
 
 # User space application
-xdpnf: utils libs $(UTIL_OBJECTS)
+xdpnf:  libs utils $(UTIL_OBJECTS)
 	mkdir -p $(BUILDDIR)
 	$(CC) $(LDFLAGS) $(INCS_USER) -o $(XDPNFOUT) $(LIBBPFOBJS) $(LIBXDPOBJS) $(XDPNFSRC) $(UTIL_OBJECTS)
 
