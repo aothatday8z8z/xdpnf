@@ -92,13 +92,13 @@ struct ipv6_addr {
 };
 
 enum rule_action {
-    RL_ABORTED = 0,     // Abort processing
-	RL_DROP,            // Drop the packet
-	RL_ACCEPT,          // Pass packet out from xdp processing to kernel processing
-	RL_TX,              // Send packet to interface which it came from
-	RL_REDIRECT,        // Send packet to another interface
-    RL_JUMP,            // Jump to another chain
-    RL_RETURN,          // Return to parent chain or do ACCEPT action if no parent chain
+    RL_ABORTED = XDP_ABORTED,           // Abort processing
+	RL_DROP = XDP_DROP,                 // Drop the packet
+	RL_ACCEPT = XDP_PASS,               // Pass packet out from xdp processing to kernel processing
+	RL_TX = XDP_TX,                     // Send packet to interface which it came from
+	RL_REDIRECT = XDP_REDIRECT,         // Send packet to another interface
+    RL_JUMP,                            // Jump to another chain
+    RL_RETURN,                          // Return to parent chain or do ACCEPT action if no parent chain
 };
 
 struct header_match {
@@ -174,6 +174,7 @@ struct rule
 struct chain {
     struct rule rule_list[MAX_RULES_PER_CHAIN];
     char name[CHAIN_NAME_LEN];
+    __u32 policy;
     __u16 num_rules;
 } __attribute__((__aligned__(8)));
 
