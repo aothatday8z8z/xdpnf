@@ -1,50 +1,50 @@
-// Drop TCP SYN+ACK packets to port 80 from 192.168.1.1/24
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=tcp,saddr=192.168.1.1/24,dport=80,tcp_flags=syn|ack,action=drop"
+// Drop TCP SYN+ACK packets to port 80 from 30.0.3.5/24
+xdpnf append -c default "l3_proto=ipv4,l4_proto=tcp,saddr=30.0.3.5/24,dport=80,tcp_flags=syn|ack,action=drop"
+// Drop TCP SYN+ACK packets to port 22 from 30.0.3.5/24 with rate limit
+xdpnf append -c default "l3_proto=ipv4,l4_proto=tcp,saddr=30.0.3.5/24,dport=22,tcp_flags=syn|ack,limit=100|10|pps,action=drop"
+// Drop TCP SYN packets to port 443 from 30.0.3.5/24
+xdpnf append -c default "l3_proto=ipv4,l4_proto=tcp,saddr=30.0.3.5/24,dport=443,tcp_flags=syn,action=drop"
+// Drop TCP SYN+ACK packets to port 21 from 30.0.3.5/24 with rate limit
+xdpnf append -c default "l3_proto=ipv4,l4_proto=tcp,saddr=30.0.3.5/24,dport=21,tcp_flags=syn|ack,limit=50|5|pps,action=drop"
+// Drop TCP FIN+RST packets from port 443 to 30.0.3.4/16
+xdpnf append -c default "l3_proto=ipv4,l4_proto=tcp,dst_ip=30.0.3.4/16,sport=443,tcp_flags=fin|rst,action=drop"
+// Drop TCP PSH+ACK packets from port 80 to 30.0.3.4/16
+xdpnf append -c default "l3_proto=ipv4,l4_proto=tcp,dst_ip=30.0.3.4/16,sport=80,tcp_flags=psh|ack,action=drop"
 // Accept UDP packets to port 53 from 2001:db8::1/64
-xdpnf append -c default -r "l3_proto=ipv6,l4_proto=udp,saddr=2001:db8::1/64,dport=53,action=accept"
-// Drop ICMP Echo Request packets from 10.0.0.1/8
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=icmp,saddr=10.0.0.1/8,icmp_type=8,icmp_code=0,action=drop"
-// Accept ICMPv6 Echo Request packets from fe80::1/64
-xdpnf append -c default -r "l3_proto=ipv6,l4_proto=icmpv6,saddr=fe80::1/64,icmp_type=128,icmp_code=0,action=accept"
-// Drop TCP FIN+RST packets from port 443 to 172.16.0.1/16
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=tcp,dst_ip=172.16.0.1/16,sport=443,tcp_flags=fin|rst,action=drop"
+xdpnf append -c default "l3_proto=ipv6,l4_proto=udp,saddr=2001:db8::1/64,dport=53,action=accept"
 // Accept UDP packets from port 123 to 2001:db8::2/64
-xdpnf append -c default -r "l3_proto=ipv6,l4_proto=udp,dst_ip=2001:db8::2/64,sport=123,action=accept"
-// Drop ICMP Destination Unreachable packets to 192.168.0.1/24
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=icmp,dst_ip=192.168.0.1/24,icmp_type=3,icmp_code=1,action=drop"
-// Accept ICMPv6 Echo Reply packets to fe80::2/64
-xdpnf append -c default -r "l3_proto=ipv6,l4_proto=icmpv6,dst_ip=fe80::2/64,icmp_type=129,icmp_code=0,action=accept"
-// Drop TCP SYN+ACK packets to port 22 from 192.168.1.2/24 with rate limit
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=tcp,saddr=192.168.1.2/24,dport=22,tcp_flags=syn|ack,limit=100|10|pps,action=drop"
-// Jump to another_chain for UDP packets to port 161 from 2001:db8::3/64 with rate limit
-xdpnf append -c default -r "l3_proto=ipv6,l4_proto=udp,saddr=2001:db8::3/64,dport=161,limit=200|20|bps,goto=another_chain"
-// Drop TCP SYN packets to port 443 from 192.168.1.3/24
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=tcp,saddr=192.168.1.3/24,dport=443,tcp_flags=syn,action=drop"
+xdpnf append -c default "l3_proto=ipv6,l4_proto=udp,dst_ip=2001:db8::2/64,sport=123,action=accept"
 // Accept UDP packets to port 123 from 2001:db8::4/64
-xdpnf append -c default -r "l3_proto=ipv6,l4_proto=udp,saddr=2001:db8::4/64,dport=123,action=accept"
-// Drop ICMP Echo Reply packets from 10.0.0.2/8
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=icmp,saddr=10.0.0.2/8,icmp_type=0,icmp_code=0,action=drop"
-// Accept ICMPv6 Echo Reply packets from fe80::3/64
-xdpnf append -c default -r "l3_proto=ipv6,l4_proto=icmpv6,saddr=fe80::3/64,icmp_type=129,icmp_code=0,action=accept"
-// Drop TCP PSH+ACK packets from port 80 to 172.16.0.2/16
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=tcp,dst_ip=172.16.0.2/16,sport=80,tcp_flags=psh|ack,action=drop"
+xdpnf append -c default "l3_proto=ipv6,l4_proto=udp,saddr=2001:db8::4/64,dport=123,action=accept"
 // Accept UDP packets from port 53 to 2001:db8::5/64
-xdpnf append -c default -r "l3_proto=ipv6,l4_proto=udp,dst_ip=2001:db8::5/64,sport=53,action=accept"
-// Drop ICMP Destination Unreachable packets to 192.168.0.2/24
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=icmp,dst_ip=192.168.0.2/24,icmp_type=3,icmp_code=3,action=drop"
-// Accept ICMPv6 Destination Unreachable packets to fe80::4/64
-xdpnf append -c default -r "l3_proto=ipv6,l4_proto=icmpv6,dst_ip=fe80::4/64,icmp_type=1,icmp_code=4,action=accept"
-// Drop TCP SYN+ACK packets to port 21 from 192.168.1.4/24 with rate limit
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=tcp,saddr=192.168.1.4/24,dport=21,tcp_flags=syn|ack,limit=50|5|pps,action=drop"
+xdpnf append -c default "l3_proto=ipv6,l4_proto=udp,dst_ip=2001:db8::5/64,sport=53,action=accept"
+// Jump to another_chain for UDP packets to port 161 from 2001:db8::3/64 with rate limit
+xdpnf append -c default "l3_proto=ipv6,l4_proto=udp,saddr=2001:db8::3/64,dport=161,limit=200|20|bps,goto=another_chain"
 // Jump to another_chain for UDP packets to port 69 from 2001:db8::6/64 with rate limit
-xdpnf append -c default -r "l3_proto=ipv6,l4_proto=udp,saddr=2001:db8::6/64,dport=69,limit=100|10|bps,goto=another_chain"
+xdpnf append -c default "l3_proto=ipv6,l4_proto=udp,saddr=2001:db8::6/64,dport=69,limit=100|10|bps,goto=another_chain"
+// Drop ICMP Echo Request packets from 30.0.3.5/8
+xdpnf append -c default "l3_proto=ipv4,l4_proto=icmp,saddr=30.0.3.5/8,icmp_type=8,icmp_code=0,action=drop"
+// Drop ICMP Echo Reply packets from 30.0.3.5/8
+xdpnf append -c default "l3_proto=ipv4,l4_proto=icmp,saddr=30.0.3.5/8,icmp_type=0,icmp_code=0,action=drop"
+// Drop ICMP Destination Unreachable packets to 30.0.3.4/24
+xdpnf append -c default "l3_proto=ipv4,l4_proto=icmp,dst_ip=30.0.3.4/24,icmp_type=3,icmp_code=1,action=drop"
+// Drop ICMP Destination Unreachable packets to 30.0.3.4/24
+xdpnf append -c default "l3_proto=ipv4,l4_proto=icmp,dst_ip=30.0.3.4/24,icmp_type=3,icmp_code=3,action=drop"
+// Accept ICMPv6 Echo Request packets from fe80::1/64
+xdpnf append -c default "l3_proto=ipv6,l4_proto=icmpv6,saddr=fe80::1/64,icmp_type=128,icmp_code=0,action=accept"
+// Accept ICMPv6 Echo Reply packets to fe80::2/64
+xdpnf append -c default "l3_proto=ipv6,l4_proto=icmpv6,dst_ip=fe80::2/64,icmp_type=129,icmp_code=0,action=accept"
+// Accept ICMPv6 Echo Reply packets from fe80::3/64
+xdpnf append -c default "l3_proto=ipv6,l4_proto=icmpv6,saddr=fe80::3/64,icmp_type=129,icmp_code=0,action=accept"
+// Accept ICMPv6 Destination Unreachable packets to fe80::4/64
+xdpnf append -c default "l3_proto=ipv6,l4_proto=icmpv6,dst_ip=fe80::4/64,icmp_type=1,icmp_code=4,action=accept"
 // Invalid L4 protocol to test error handling
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=xyz,saddr=192.168.1.5/24,dport=80,action=drop"
+xdpnf append -c default "l3_proto=ipv4,l4_proto=xyz,saddr=30.0.3.5/24,dport=80,action=drop"
 // Invalid port number to test error handling
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=tcp,saddr=192.168.1.6/24,dport=70000,action=drop"
+xdpnf append -c default "l3_proto=ipv4,l4_proto=tcp,saddr=30.0.3.5/24,dport=70000,action=drop"
 // Invalid TCP flag to test error handling
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=tcp,saddr=192.168.1.7/24,dport=80,tcp_flags=xyz,action=drop"
+xdpnf append -c default "l3_proto=ipv4,l4_proto=tcp,saddr=30.0.3.5/24,dport=80,tcp_flags=xyz,action=drop"
 // Invalid ICMP type to test error handling
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=icmp,saddr=10.0.0.3/8,icmp_type=300,action=drop"
+xdpnf append -c default "l3_proto=ipv4,l4_proto=icmp,saddr=30.0.3.5/8,icmp_type=300,action=drop"
 // Invalid ICMP code to test error handling
-xdpnf append -c default -r "l3_proto=ipv4,l4_proto=icmp,saddr=10.0.0.4/8,icmp_code=300,action=drop"
+xdpnf append -c default "l3_proto=ipv4,l4_proto=icmp,saddr=30.0.3.5/8,icmp_code=300,action=drop"
