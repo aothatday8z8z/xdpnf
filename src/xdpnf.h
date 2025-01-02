@@ -22,6 +22,7 @@
 //     ((rule_id) & MAX_RULES_PER_CHAIN)
 
 #define NANO_TO_SEC 1000000000
+#define TOKEN_VALUE 1000000000 // set token value to 1ns
 #define KBYTE_TO_BYTE 1024
 #define MBYTE_TO_BYTE 1048576
 #define GBYTE_TO_BYTE 1073741824

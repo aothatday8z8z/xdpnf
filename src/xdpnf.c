@@ -598,6 +598,8 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
                 if (rate_limit_str && burst_size_str && limit_type_str) {
                     rl->rate_limit = atoi(rate_limit_str);
                     rl->bucket_size = atoi(burst_size_str);
+					// rl->rate_limit *= TOKEN_VALUE;
+					rl->bucket_size *= TOKEN_VALUE;
 
 					if (rl->rate_limit <= 0 || rl->bucket_size <= 0) {
 						ret |= PARSE_ERR_INVALID_RATE_LIMIT;
@@ -633,6 +635,7 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
                     ret |= PARSE_ERR_INVALID_RATE_LIMIT;
                 }
 			}
+			
 			else if (strcmpns(key, "action") == 0) {
 				if (strcmpns(value, "drop") == 0) {
 					r->action = RL_DROP;
@@ -685,7 +688,6 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
     struct chain c = {};
 	struct rule r;
 	struct rule_stats st = {.bytes=0, .packets=0};
-	struct timespec now;
 	struct rate_limiter rl, tmp_rl;
 	struct bpf_map_info rl_info = {}, st_info = {};
 	char parse_err[100], goto_chain[CHAIN_NAME_LEN];
@@ -750,14 +752,9 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 			err = EXIT_FAILURE;
 			goto out;
 		}
-	    if (clock_gettime(CLOCK_MONOTONIC, &now) == -1) {
-			pr_warn("Couldn't get current time\n");
-			err = EXIT_FAILURE;
-			goto out;
-		}
 		rl.enabled = TRUE;
-		rl.last_update = now.tv_sec * 1000000000UL + now.tv_nsec;
-		rl.tokens = 0;
+		rl.last_update = 0;
+		rl.tokens = rl.bucket_size; // Initialize the bucket with full tokens
 		err = bpf_map_update_elem(rl_map_fd, &rl_key, &rl, BPF_ANY);
 		if (err) {
 			err = -errno;
@@ -1486,14 +1483,8 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 
 		if (new_r.match_field_flags & MATCH_RATE_LIMIT) {
 			// Update rate limiter
-			struct timespec now;
-			if (clock_gettime(CLOCK_MONOTONIC, &now) == -1) {
-				pr_warn("Couldn't get current time\n");
-				err = EXIT_FAILURE;
-				goto out;
-			}
-			new_rl.tokens = 0;
-			new_rl.last_update = now.tv_sec * 1000000000UL + now.tv_nsec;
+			new_rl.tokens = new_rl.bucket_size;
+			new_rl.last_update = 0;
 			new_rl.enabled = TRUE;
 			
 			err = bpf_map_update_elem(rl_map_fd, &rl_key, &new_rl, BPF_ANY);
@@ -1534,15 +1525,9 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 					err = EXIT_FAILURE;
 					goto out;
 				}
-				struct timespec now;
-				if (clock_gettime(CLOCK_MONOTONIC, &now) == -1) {
-					pr_warn("Couldn't get current time\n");
-					err = EXIT_FAILURE;
-					goto out;
-				}
 				new_rl.enabled = TRUE;
-				new_rl.last_update = now.tv_sec * 1000000000UL + now.tv_nsec;
-				new_rl.tokens = 0;
+				new_rl.last_update = 0;
+				new_rl.tokens = new_rl.bucket_size;
 				err = bpf_map_update_elem(rl_map_fd, &rl_key, &new_rl, BPF_ANY);
 				if (err) {
 					err = -errno;
@@ -1748,7 +1733,7 @@ static int print_chain(struct chain *c, int c_map_fd, int st_map_fd, int rl_map_
 			}
 			char limit_type[10];
 			__u64 limit_value = rl.rate_limit;
-			__u64 burst_value = rl.bucket_size;
+			__u64 burst_value = (__u64)(rl.bucket_size/TOKEN_VALUE);
 			if (rl.type == LIMIT_PPS) {
 				if (limit_value < KBYTE_TO_BYTE) {
 					snprintf(limit_type, sizeof(limit_type), "pps");

@@ -400,34 +400,34 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
                 if (!rl) 
 					continue;
 
-				bpf_printk("Matching rate limit: limit %llu, burst %llu, tokens %llu, last_update %llu\n", rl->rate_limit, rl->bucket_size, rl->tokens, rl->last_update);
-				__u64 now, delta;
+				__u64 now;
+				__s64 delta;
 				now = bpf_ktime_get_ns();
-				rl->tokens += (now - rl->last_update) * (rl->rate_limit/NANO_TO_SEC);
+				rl->tokens += (now - rl->last_update) * rl->rate_limit; 
+				rl->tokens = (rl->tokens > rl->bucket_size) ? (rl->bucket_size) : rl->tokens;
+				// bpf_printk("Now: %llu\n", now);
+				// bpf_printk("Last update: %llu\n", rl->last_update);
+				// bpf_printk("rate: %llu\n", rl->rate_limit);
+				// bpf_printk("Current tokens: %llu\n", rl->tokens);
 				rl->last_update = now;
-				if (rl->tokens > rl->bucket_size)
-					rl->tokens = rl->bucket_size;
 				if (rl->type == LIMIT_PPS)
-					delta = rl->tokens - 1;
+					delta = rl->tokens - TOKEN_VALUE;
 				else if (rl->type == LIMIT_BPS)
-					delta = rl->tokens - pkt_len;
+					delta = rl->tokens - pkt_len*TOKEN_VALUE;
 
 				if (delta >= 0) {
 					rl->tokens = delta;
-					bpf_map_update_elem(&limiters_map, &r->limiter_id, c, BPF_ANY);
+					bpf_map_update_elem(&limiters_map, &r->limiter_id, rl, BPF_ANY);
 					continue;
 				} else {
-					bpf_printk("Rate limit exceeded\n");
-					bpf_map_update_elem(&limiters_map, &r->limiter_id, c, BPF_ANY);
+					bpf_map_update_elem(&limiters_map, &r->limiter_id, rl, BPF_ANY);
 				}
 
-				// bpf_map_update_elem(&limiters_map, &r->limiter_id, c, BPF_ANY);
             }
 
 			bpf_printk("Matched rule, do action %d\n", r->action);
 			// Update stats
 			struct rule_stats *rs = bpf_map_lookup_elem(&stats_map, &r->stats_id);
-			// bpf_printk("Stats id: %d\n", r->stats_id);
 			if (rs) {
 				rs->bytes += pkt_len;
 				rs->packets++;
