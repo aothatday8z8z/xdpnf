@@ -116,7 +116,6 @@ int do_load(const void *cfg, const char *pin_root_path)
 	struct xdp_program *p = NULL;
 	char *filename = NULL;
 	int c_map_fd = -1;
-	int retry = 0;
 
 	DECLARE_LIBBPF_OPTS(bpf_object_open_opts, opts,
 			    .pin_root_path = pin_root_path);
@@ -147,8 +146,6 @@ int do_load(const void *cfg, const char *pin_root_path)
 	silence_libbpf_logging();
 
 retry:
-	if (retry > 3)
-		goto out;
 	xdp_opts.find_filename = "xdpnf_kern.o";
 	xdp_opts.opts = &opts;
 	/* prog_name is NULL, so choose the first program in object */
@@ -157,7 +154,6 @@ retry:
 	if (err) {
 		if (err == -EPERM && !double_rlimit())
 		{
-			retry++;
 			goto retry;
 		}
 
@@ -171,7 +167,6 @@ retry:
 	if (err) {
 		if (err == -EPERM && !double_rlimit()) {
 			xdp_program__close(p);
-			retry++;
 			goto retry;
 		}
 
@@ -1613,13 +1608,13 @@ static struct prog_option list_options[] = {
 static int print_chain(struct chain *c, int c_map_fd, int st_map_fd, int rl_map_fd) {
 	switch (c->policy) {
 		case RL_ACCEPT:
-			printf("Chain %s (policy: accept, %d rules)\n", c->name, c->num_rules);
+			printf("Chain %s (policy: accept, %d/%d rules)\n", c->name, c->num_rules, MAX_RULES_PER_CHAIN);
 			break;
 		case RL_DROP:
-			printf("Chain %s (policy: drop, %d rules)\n", c->name, c->num_rules);
+			printf("Chain %s (policy: drop, %d/%d rules)\n", c->name, c->num_rules, MAX_RULES_PER_CHAIN);
 			break;
 		default:
-			printf("Chain %s (policy: unknown, %d rules)\n", c->name, c->num_rules);
+			printf("Chain %s (policy: unknown, %d/%d rules)\n", c->name, c->num_rules, MAX_RULES_PER_CHAIN);
 			break;
 	}
 
