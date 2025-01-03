@@ -729,6 +729,13 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 		err = EXIT_FAILURE;
 		goto out;
 	}
+	 
+	if (r.action == 0) {
+		pr_warn("Action is not specified\n");
+		err = EXIT_FAILURE;
+		goto out;
+	}
+	
 	pr_debug("Parsed rule: l3_proto=%s, l4_proto=%s, saddr=%s, daddr=%s, sport=%d, dport=%d, tcp_flags=0x%x, icmp_type=%d, icmp_code=%d\n",
 		(r.match_field_flags & MATCH_IPV4) ? "ipv4" : "ipv6",
 		(r.match_field_flags & MATCH_TCP) ? "tcp" : (r.match_field_flags & MATCH_UDP) ? "udp" : (r.match_field_flags & MATCH_ICMP) ? "icmp" : "icmpv6",
