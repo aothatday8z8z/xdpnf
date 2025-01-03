@@ -78,8 +78,6 @@ struct icmphdr_common {
 #define IPV6_EXT_MAX_CHAIN 6
 #endif
 
-#define MAX_CHAIN_DEPTH 2
-
 
 #define CHECK_RET(ret)                        \
 	do {                                  \
@@ -306,11 +304,11 @@ static __always_inline int parse_tcphdr(struct hdr_cursor *nh,
 static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, __u32 chain_id) {
     for (int depth = 0; depth < MAX_CHAIN_DEPTH; depth++) {
         struct chain *c= NULL;
+		__u16 i;
 		c = bpf_map_lookup_elem(&chains_map, &chain_id);
         if (!c)
             return RL_ABORTED;
-
-        for (__u16 i = 0; i < MAX_RULES_PER_CHAIN; i++) {
+        for (i = 0; i < MAX_RULES_PER_CHAIN; i++) {
 			struct rule *r = &c->rule_list[i];
 
 			__u32 match_field_flags = c->rule_list[i].match_field_flags;
@@ -322,78 +320,46 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 				continue;
 			
 			// Check IPv4 addr match
-			if ((match_field_flags & MATCH_SRC_ADDR) && (match_field_flags & MATCH_IPV4)) {
-				bpf_printk("Matching ipv4 src addr\n");
-				__u32 check = (pkt_hdrs->src_ip.ipv4.addr ^ r->src_ip.ipv4.addr) & r->src_ip.ipv4.mask;
-				if (check)
-					continue;
-			}
-			if ((match_field_flags & MATCH_DST_ADDR) && (match_field_flags & MATCH_IPV4)) {
-				bpf_printk("Matching ipv4 dst addr\n");
-				__u32 check = (pkt_hdrs->dst_ip.ipv4.addr ^ r->dst_ip.ipv4.addr) & r->dst_ip.ipv4.mask;
-				if (check)
-					continue;
-			}
+			if ((match_field_flags & MATCH_SRC_ADDR) && (match_field_flags & MATCH_IPV4) &&
+				((pkt_hdrs->src_ip.ipv4.addr ^ r->src_ip.ipv4.addr) & r->src_ip.ipv4.mask))
+				continue;
+
+			if ((match_field_flags & MATCH_DST_ADDR) && (match_field_flags & MATCH_IPV4) &&
+				((pkt_hdrs->dst_ip.ipv4.addr ^ r->dst_ip.ipv4.addr) & r->dst_ip.ipv4.mask))
+				continue;
 
 			// Check src addr match
 			if ((match_field_flags & MATCH_SRC_ADDR) && (match_field_flags & MATCH_IPV6)) {
-				bpf_printk("Matching ipv6 src addr\n");
-				__u8 i = 0;
-				for (i = 0; i < IPV6_ADDR_LEN; i += 8) {
-					__u64 check = ( ((__u64 *)pkt_hdrs->src_ip.ipv6.addr)[i] ^ ((__u64 *)r->src_ip.ipv6.addr)[i] ) & ((__u64 *)r->src_ip.ipv6.mask)[i];
-					
-					// bpf_printk("check: %llu\n", check);
-					if (check) 
+				__u8 k;
+				// bpf_printk("Matching src IPV6 addr\n");
+				for (k = 0; k < IPV6_ADDR_LEN; k += 8) {
+					if ((((__u64 *)pkt_hdrs->src_ip.ipv6.addr)[k] ^ ((__u64 *)r->src_ip.ipv6.addr)[k]) & ((__u64 *)r->src_ip.ipv6.mask)[k])
 						break;
 				}
-				if (i < IPV6_ADDR_LEN)
+				if (k < IPV6_ADDR_LEN)
 					continue;
-		    }
-			
+			}
+
 			if ((match_field_flags & MATCH_DST_ADDR) && (match_field_flags & MATCH_IPV6)) {
-				bpf_printk("Matching ipv6 dst addr\n");
-				__u8 i = 0;
-				for (i = 0; i < IPV6_ADDR_LEN; i += 8) {
-					__u64 check = ( ((__u64 *)pkt_hdrs->dst_ip.ipv6.addr)[i] ^ ((__u64 *)r->dst_ip.ipv6.addr)[i] ) & ((__u64 *)r->dst_ip.ipv6.mask)[i];
-					if (check)
-					{
+				__u8 k;
+				// bpf_printk("Matching dst IPV6 addr\n");
+				for (k = 0; k < IPV6_ADDR_LEN; k += 8) {
+					if ((((__u64 *)pkt_hdrs->dst_ip.ipv6.addr)[k] ^ ((__u64 *)r->dst_ip.ipv6.addr)[k]) & ((__u64 *)r->dst_ip.ipv6.mask)[k])
 						break;
-					}
 				}
-				if (i < IPV6_ADDR_LEN)
+				if (k < IPV6_ADDR_LEN)
 					continue;
 			}
 
 			// Check ICMP match
-			if ((match_field_flags & MATCH_ICMP_CODE) && (pkt_hdrs->icmp_code != r->icmp_code))
-			{
-				bpf_printk("icmp code not matched\n");
+			if ((match_field_flags & MATCH_ICMP_CODE && pkt_hdrs->icmp_code != r->icmp_code) ||
+				(match_field_flags & MATCH_ICMP_TYPE && pkt_hdrs->icmp_type != r->icmp_type) ||
+				// Check port match	
+				(match_field_flags & MATCH_SPORT && pkt_hdrs->sport != r->sport) ||
+				(match_field_flags & MATCH_DPORT && pkt_hdrs->dport != r->dport) ||
+				// Check TCP flags match
+				(match_field_flags & MATCH_TCP_FLAGS && (pkt_hdrs->tcp_flags & r->tcp_flags) != r->tcp_flags))
 				continue;
-			}
-			if ((match_field_flags & MATCH_ICMP_TYPE) && (pkt_hdrs->icmp_type != r->icmp_type))
-			{
-				bpf_printk("icmp type not matched\n");
-				continue;
-			}
-                
-			// Check port match	
-			if ((match_field_flags & MATCH_SPORT) && (pkt_hdrs->sport != r->sport))
-			{
-				bpf_printk("sport not matched\n");
-				continue;
-			}
-			if ((match_field_flags & MATCH_DPORT) && (pkt_hdrs->dport != r->dport))
-			{
-				bpf_printk("dport not matched\n");
-				continue;
-			}
-
-			// Check TCP flags match
-			if ((match_field_flags & MATCH_TCP_FLAGS) && ((pkt_hdrs->tcp_flags & r->tcp_flags) != r->tcp_flags))
-			{
-				bpf_printk("tcp flags not matched.Pkt flags %X, rule flags%X\n", pkt_hdrs->tcp_flags, r->tcp_flags);
-				continue;
-			}
 
 			// Check rate limit
             if (match_field_flags & MATCH_RATE_LIMIT) {
@@ -413,9 +379,12 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 				// bpf_printk("Current tokens: %llu\n", rl->tokens);
 				rl->last_update = now;
 				if (rl->type == LIMIT_PPS)
-					delta = (__s64)(rl->tokens - TOKEN_VALUE);
+					delta = (__s64)(rl->tokens) - (__s64)(TOKEN_VALUE);
 				else if (rl->type == LIMIT_BPS)
-					delta = (__s64)(rl->tokens - pkt_len*TOKEN_VALUE);
+				{
+					delta = (__s64)(rl->tokens) - (__s64)(pkt_len)*TOKEN_VALUE;
+					// bpf_printk("Pkt len: %llu, tokens: %llu, delta: %lld\n", pkt_len, rl->tokens, delta);
+				}
 
 				if (delta >= 0) {
 					rl->tokens = delta;
@@ -427,7 +396,7 @@ static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, _
 
             }
 
-			bpf_printk("Matched rule, do action %d\n", r->action);
+			// bpf_printk("Matched rule, do action %d\n", r->action);
 			// Update stats
 			struct rule_stats *rs = NULL;
 			rs = bpf_map_lookup_elem(&stats_map, &r->stats_id);

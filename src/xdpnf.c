@@ -208,7 +208,7 @@ out:
 	free(filename);
 	prog_lock_release(lock_fd);
 	if (err)
-		printf("Failed to load xdpnf\n");
+		pr_warn("Failed to load xdpnf\n");
 	return err;
 }
 
@@ -333,14 +333,14 @@ int do_unload(const void *cfg, const char *pin_root_path)
 	}
 
 	if (!opt->iface.ifindex) {
-		printf("Must specify ifname or --all\n");
+		pr_warn("Must specify ifname or --all\n");
 		err = EXIT_FAILURE;
 		goto out;
 	}
 
 	err = get_pinned_program(&opt->iface, pin_root_path, &mode, &prog);
 	if (err) {
-		printf("xdpnf is not loaded on %s\n", opt->iface.ifname);
+		pr_warn("xdpnf is not loaded on %s\n", opt->iface.ifname);
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -363,6 +363,10 @@ clean_maps:
 
 out:
 	prog_lock_release(lock_fd);
+	if (err)
+		pr_warn("Failed to unload xdpnf\n");
+	else
+		pr_info("XDP program unloaded\n");
 	return err;
 }
 
@@ -605,7 +609,7 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
 					}
 
 					if (rl->rate_limit > rl->bucket_size) {
-						printf("Rate limit cannot be greater than burst size, set burst size = rate limit\n");
+						pr_warn("Rate limit cannot be greater than burst size, set burst size = rate limit\n");
 						rl->bucket_size = rl->rate_limit;
 					}
 
@@ -651,7 +655,7 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
 				strncpy(goto_chain, value, 32);
 			}
         } else {
-            printf("Invalid field: %s\n", fields[i]);
+            pr_warn("Invalid field: %s\n", fields[i]);
 			ret |= PARSE_ERR_INVALID_FIELD;
         }
     }
@@ -705,7 +709,7 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 	}
 	err = get_chain_by_name(opt->chain, c_map_fd, &c, &c_key);
 	if (err) {
-		pr_debug("Couldn't find chain %s\n", opt->chain);
+		pr_warn("Couldn't find chain %s\n", opt->chain);
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -773,7 +777,7 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 		int goto_key;
 		err = get_chain_by_name(goto_chain, c_map_fd, &goto_c, &goto_key);
 		if (err) {
-			pr_debug("Jump error, couldn't find destination chain %s.\n", goto_chain);
+			pr_warn("Jump error, couldn't find destination chain %s.\n", goto_chain);
 			err = EXIT_FAILURE;
 			goto out;
 		}
@@ -832,7 +836,7 @@ out:
 		close(st_map_fd);
 	prog_lock_release(lock_fd);
 	if (err == EXIT_SUCCESS) 
-		printf("Rule appended to chain %s\n", opt->chain);
+		pr_info("Rule appended to chain %s\n", opt->chain);
 
 	return err;
 }
@@ -902,11 +906,12 @@ int do_newchain(__unused const void *cfg, __unused const char *pin_root_path)
 	err = bpf_map_update_elem(c_map_fd, &c_key, &c, BPF_ANY);
 	if (err) {
 		err = -errno;
-		pr_warn("Couldn't create chain %s: %s\n", opt->chain, strerror(-err));
+		pr_warn("Couldn't create chain%s\n", opt->chain);
+		pr_debug("Couldn't create chain %s: %s\n", opt->chain, strerror(-err));
 		err = EXIT_FAILURE;
 		goto out;
 	}
-	pr_debug("Created chain %s with id %d\n", opt->chain, c_key);
+	pr_info("Created chain %s with id %d\n", opt->chain, c_key);
 
 out:
 	if (c_map_fd >= 0)
@@ -1002,8 +1007,8 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 	int lock_fd, c_key, rl_key;
 	const struct deleteopt *opt = cfg;
 	struct chain c = {};
-	struct rule r = {.match_field_flags = 0};
-	struct rate_limiter rl;
+	struct rule r = {};
+	struct rate_limiter rl = {};
 	struct bpf_map_info rl_info = {};
 	char parse_err[100], goto_chain[CHAIN_NAME_LEN];
 
@@ -1015,13 +1020,14 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 	// Get chain map	
 	c_map_fd = get_pinned_map_fd(pin_root_path, "chains_map", NULL);
 	if (c_map_fd < 0) {
-		printf("Couldn't find chain map; is xdpnf loaded\n");
+		pr_warn("Couldn't find chain map; is xdpnf loaded\n");
 		err = EXIT_FAILURE;
 		goto out;
 	}
+	
 	err = get_chain_by_name(opt->chain_name, c_map_fd, &c, &c_key);
 	if (err) {
-		printf("Couldn't find chain %s\n", opt->chain_name);
+		pr_warn("Couldn't find chain %s\n", opt->chain_name);
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -1029,19 +1035,19 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 
 
 	if (!opt->rule_id && !opt->rule_str) {
-		printf("Rule id or rule string is required\n");
+		pr_warn("Rule id or rule string is required\n");
 		err = EXIT_FAILURE;
 		goto out;
 	}
 	if (opt->rule_id && opt->rule_str) {
-		printf("Only one of rule id or rule string can be specified\n");
+		pr_warn("Only one of rule id or rule string can be specified\n");
 		err = EXIT_FAILURE;
 		goto out;
 	}
 
 	if (opt->rule_id) {
-		if (opt->rule_id < 1 || opt->rule_id >= c.num_rules) {
-			printf("Rule id %d is out of range\n", opt->rule_id);
+		if (opt->rule_id < 1 || opt->rule_id > c.num_rules) {
+			pr_warn("Rule id %d is out of range\n", opt->rule_id);
 			err = EXIT_FAILURE;
 			goto out;
 		}
@@ -1051,7 +1057,7 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 	else if (opt->rule_str) {
 		err = decode_rule(opt->rule_str, &r, &rl, goto_chain);
 		if (err != PARSE_OK) {
-			pr_debug("Couldn't parse rule: %s\n", opt->rule_str);
+			pr_warn("Couldn't parse rule: %s\n", opt->rule_str);
 			print_flags(parse_err, sizeof(parse_err), parse_errors, err);
 			err = EXIT_FAILURE;
 			goto out;
@@ -1063,7 +1069,7 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 			int goto_key;
 			err = get_chain_by_name(goto_chain, c_map_fd, &goto_c, &goto_key);
 			if (err) {
-				printf("Jump error, couldn't find destination chain %s.\n", goto_chain);
+				pr_warn("Jump error, couldn't find destination chain %s.\n", goto_chain);
 				err = EXIT_FAILURE;
 				goto out;
 			}
@@ -1078,7 +1084,7 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 			}
 		}
 		if (rule_idx == -1) {
-			printf("Couldn't find rule %s in chain %s\n", opt->rule_str, opt->chain_name);
+			pr_warn("Couldn't find rule %s in chain %s\n", opt->rule_str, opt->chain_name);
 			err = EXIT_FAILURE;
 			goto out;
 		}
@@ -1098,7 +1104,7 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 		err = bpf_map_delete_elem(rl_map_fd, &rl_key);
 		if (err) {
 			err = -errno;
-			printf("Couldn't delete rate limiter from map: %s\n", strerror(-err));
+			pr_warn("Couldn't delete rate limiter from map: %s\n", strerror(-err));
 			err = EXIT_FAILURE;
 			goto out;
 		}
@@ -1106,10 +1112,11 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 	}
 
 	// Delete rule stats
+	st_map_fd = get_pinned_map_fd(pin_root_path, "stats_map", NULL);
 	err = bpf_map_delete_elem(st_map_fd, &r.stats_id);
 	if (err) {
 		err = -errno;
-		printf("Couldn't delete stats from map: %s\n", strerror(-err));
+		pr_warn("Couldn't delete stats from map: %s\n", strerror(-err));
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -1123,7 +1130,7 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 	err = bpf_map_update_elem(c_map_fd, &c_key, &c, BPF_ANY);
 	if (err) {
 		err = -errno;
-		printf("Couldn't delete rule from chain %s: %s\n", opt->chain_name, strerror(-err));
+		pr_warn("Couldn't delete rule from chain %s: %s\n", opt->chain_name, strerror(-err));
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -1136,7 +1143,9 @@ out:
 		close(st_map_fd);
 	prog_lock_release(lock_fd);
 	if (err == EXIT_SUCCESS)
-		printf("Deleted rule from chain %s\n", opt->chain_name);
+		pr_info("Deleted rule from chain %s\n", opt->chain_name);
+	else
+		pr_warn("Failed to delete rule from chain %s\n", opt->chain_name);
 	return err;
 }
 
@@ -1173,7 +1182,7 @@ int do_delchain(__unused const void *cfg, __unused const char *pin_root_path)
 	}
 	err = get_chain_by_name(opt->chain_name, c_map_fd, &c, &c_key);
 	if (err) {
-		printf("Couldn't find chain %s\n", opt->chain_name);
+		pr_warn("Couldn't find chain %s\n", opt->chain_name);
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -1188,7 +1197,7 @@ int do_delchain(__unused const void *cfg, __unused const char *pin_root_path)
 		}
 		for (int i = 0; i < c.num_rules; i++) {
 			if (c.rule_list[i].action == RL_JUMP && c.rule_list[i].goto_id == c_key) {
-				printf("Rule %d in chain %s jumps to chain %s, please delete it first\n", i+1, c.name, opt->chain_name);
+				pr_warn("Rule %d in chain %s jumps to chain %s, please delete it first\n", i+1, c.name, opt->chain_name);
 				err = EXIT_FAILURE;
 				goto out;
 			}
@@ -1209,7 +1218,7 @@ out:
 		close(c_map_fd);
 	prog_lock_release(lock_fd);
 	if (err == EXIT_SUCCESS)
-		printf("Deleted chain %s\n", opt->chain_name);
+		pr_info("Deleted chain %s\n", opt->chain_name);
 	return err;
 }
 
@@ -1252,7 +1261,7 @@ int do_rechain(__unused const void *cfg, __unused const char *pin_root_path)
 	}
 	err = get_chain_by_name(opt->old_chain, c_map_fd, &c, &c_key);
 	if (err) {
-		pr_debug("Couldn't find chain %s\n", opt->old_chain);
+		pr_warn("Couldn't find chain %s\n", opt->old_chain);
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -1273,7 +1282,7 @@ out:
 		close(c_map_fd);
 	prog_lock_release(lock_fd);
 	if (err == EXIT_SUCCESS)
-		printf("Renamed chain %s to %s\n", opt->old_chain, opt->new_chain);
+		pr_info("Renamed chain %s to %s\n", opt->old_chain, opt->new_chain);
 	return err;
 }
 
@@ -1325,7 +1334,7 @@ int do_flush(__unused const void *cfg, __unused const char *pin_root_path)
 
 	err = get_chain_by_name(opt->chain_name, c_map_fd, &c, &c_key);
 	if (err) {
-		pr_debug("Couldn't find chain %s\n", opt->chain_name);
+		pr_warn("Couldn't find chain %s\n", opt->chain_name);
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -1339,7 +1348,7 @@ int do_flush(__unused const void *cfg, __unused const char *pin_root_path)
 			err = bpf_map_delete_elem(rl_map_fd, &rl_key);
 			if (err) {
 				err = -errno;
-				printf("Couldn't delete rate limiter from map: %s\n", strerror(-err));
+				pr_warn("Couldn't delete rate limiter from map: %s\n", strerror(-err));
 				err = EXIT_FAILURE;
 				goto out;
 			}
@@ -1348,7 +1357,7 @@ int do_flush(__unused const void *cfg, __unused const char *pin_root_path)
 		err = bpf_map_delete_elem(st_map_fd, &r.stats_id);
 		if (err) {
 			err = -errno;
-			printf("Couldn't delete stats from map: %s\n", strerror(-err));
+			pr_warn("Couldn't delete stats from map: %s\n", strerror(-err));
 			err = EXIT_FAILURE;
 			goto out;
 		}
@@ -1365,7 +1374,7 @@ int do_flush(__unused const void *cfg, __unused const char *pin_root_path)
 		err = EXIT_FAILURE;
 		goto out;
 	}
-	printf("Flushed chain %s\n", opt->chain_name);
+	pr_info("Flushed chain %s\n", opt->chain_name);
 
 out:
 	if (c_map_fd >= 0)
@@ -1431,12 +1440,12 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 	}
 	err = get_chain_by_name(opt->chain, c_map_fd, &c, &c_key);
 	if (err) {
-		pr_debug("Couldn't find chain %s\n", opt->chain);
+		pr_warn("Couldn't find chain %s\n", opt->chain);
 		err = EXIT_FAILURE;
 		goto out;
 	}
-	if (opt->dest_id < 1 || opt->dest_id >= c.num_rules) {
-		pr_debug("Rule id %d is out of range\n", opt->dest_id);
+	if (opt->dest_id < 1 || opt->dest_id > c.num_rules) {
+		pr_warn("Rule id %d is out of range\n", opt->dest_id);
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -1457,7 +1466,7 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 		int goto_key;
 		err = get_chain_by_name(goto_chain, c_map_fd, &goto_c, &goto_key);
 		if (err) {
-			pr_debug("Jump error, couldn't find destination chain %s.\n", goto_chain);
+			pr_warn("Jump error, couldn't find destination chain %s.\n", goto_chain);
 			err = EXIT_FAILURE;
 			goto out;
 		}
@@ -1492,6 +1501,7 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 				err = EXIT_FAILURE;
 				goto out;
 			}
+			new_r.limiter_id = rl_key;
 			pr_debug("Updated rate limiter with id %d\n", rl_key);
 		} else {
 			// Delete rate limiter
@@ -1549,14 +1559,14 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 	err = bpf_map_update_elem(st_map_fd, &old_r.stats_id, &st, BPF_ANY);
 	if (err) {
 		err = -errno;
-		printf("Couldn't update stats in map: %s\n", strerror(-err));
+		pr_warn("Couldn't update stats in map: %s\n", strerror(-err));
 		err = EXIT_FAILURE;
 		goto out;
 	}
 	new_r.stats_id = old_r.stats_id;
 
 	// Add rule to chain
-	printf("Adding rule to chain %s\n", opt->chain);
+	pr_debug("Adding rule to chain %s\n", opt->chain);
 	c.rule_list[opt->dest_id-1] = new_r;
 	err = bpf_map_update_elem(c_map_fd, &c_key, &c, BPF_ANY);
 	if (err) {
@@ -1571,6 +1581,12 @@ out:
 		close(c_map_fd);
 	if (rl_map_fd >= 0)
 		close(rl_map_fd);
+	if (st_map_fd >= 0)
+		close(st_map_fd);
+	if (err == EXIT_SUCCESS)
+		pr_info("Rule replaced in chain %s\n", opt->chain);
+	else
+		pr_warn("Failed to replace rule in chain %s\n", opt->chain);
 	prog_lock_release(lock_fd);
 	return err;
 }
@@ -1600,7 +1616,7 @@ static int print_chain(struct chain *c, int c_map_fd, int st_map_fd, int rl_map_
 			break;
 	}
 
-	printf("%-7s %-7s %-12s %-12s %-20s %-20s %s\n", "pkts", "bytes", "action", "proto", "source", "destination", "details");
+	printf("   %-7s %-7s %-12s %-12s %-20s %-20s %s\n", "pkts", "bytes", "action", "proto", "source", "destination", "details");
 	for (int i = 0; i < c->num_rules; i++) {
 		struct rule *r = &c->rule_list[i];
 		struct rule_stats st;
@@ -1737,12 +1753,15 @@ static int print_chain(struct chain *c, int c_map_fd, int st_map_fd, int rl_map_
 					snprintf(limit_type, sizeof(limit_type), "pps");
 				} else if (limit_value < MBYTE_TO_BYTE) {
 					limit_value /= KBYTE_TO_BYTE;
+					burst_value /= KBYTE_TO_BYTE;
 					snprintf(limit_type, sizeof(limit_type), "Kpps");
 				} else if (limit_value < GBYTE_TO_BYTE) {
 					limit_value /= MBYTE_TO_BYTE;
+					burst_value /= MBYTE_TO_BYTE;
 					snprintf(limit_type, sizeof(limit_type), "Mpps");
 				} else {
 					limit_value /= GBYTE_TO_BYTE;
+					burst_value /= GBYTE_TO_BYTE;
 					snprintf(limit_type, sizeof(limit_type), "Gpps");
 				}
 			} else if (rl.type == LIMIT_BPS) {
@@ -1750,16 +1769,19 @@ static int print_chain(struct chain *c, int c_map_fd, int st_map_fd, int rl_map_
 					snprintf(limit_type, sizeof(limit_type), "bps");
 				} else if (limit_value < MBYTE_TO_BYTE) {
 					limit_value /= KBYTE_TO_BYTE;
+					burst_value /= KBYTE_TO_BYTE;
 					snprintf(limit_type, sizeof(limit_type), "Kbps");
 				} else if (limit_value < GBYTE_TO_BYTE) {
 					limit_value /= MBYTE_TO_BYTE;
+					burst_value /= MBYTE_TO_BYTE;
 					snprintf(limit_type, sizeof(limit_type), "Mbps");
 				} else {
 					limit_value /= GBYTE_TO_BYTE;
+					burst_value /= GBYTE_TO_BYTE;
 					snprintf(limit_type, sizeof(limit_type), "Gbps");
 				}
 			}
-			snprintf(detail + strlen(detail), sizeof(detail) - strlen(detail), " limit up to %llu %s burst %llu", limit_value, limit_type, burst_value);
+			snprintf(detail + strlen(detail), sizeof(detail) - strlen(detail), " limit up to %llu %s burst %llu %s", limit_value, limit_type, burst_value, limit_type);
 		}
 
 		switch (r->action) {
@@ -1782,7 +1804,7 @@ static int print_chain(struct chain *c, int c_map_fd, int st_map_fd, int rl_map_
 			memcpy(action, "UNKNOWN", sizeof(action));
 			break;
 		}
-		printf("%-7s %-7s %-12s %-12s %-20s %-20s %s\n", pkts, bytes, action, proto, src_ip, dst_ip, detail);
+		printf("%d %-7s %-7s %-12s %-12s %-20s %-20s %s\n", i+1, pkts, bytes, action, proto, src_ip, dst_ip, detail);
 	}
 	printf("\n\n");
 	return 0;
@@ -1824,7 +1846,7 @@ int do_list(__unused const void *cfg, __unused const char *pin_root_path)
 	if (opt->chain_name) {
 		err = get_chain_by_name(opt->chain_name, c_map_fd, &c, &c_key);
 		if (err) {
-			pr_debug("Couldn't find chain %s\n", opt->chain_name);
+			pr_warn("Couldn't find chain %s\n", opt->chain_name);
 			err = EXIT_FAILURE;
 			goto out;
 		}
