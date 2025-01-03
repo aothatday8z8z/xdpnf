@@ -1806,7 +1806,7 @@ static int print_chain(struct chain *c, int c_map_fd, int st_map_fd, int rl_map_
 			memcpy(action, "UNKNOWN", sizeof(action));
 			break;
 		}
-		printf("%d %-7s %-7s %-12s %-12s %-20s %-20s %s\n", i+1, pkts, bytes, action, proto, src_ip, dst_ip, detail);
+		printf("%-3d %-7s %-7s %-12s %-12s %-20s %-20s %s\n", i+1, pkts, bytes, action, proto, src_ip, dst_ip, detail);
 	}
 	printf("\n\n");
 	return 0;
