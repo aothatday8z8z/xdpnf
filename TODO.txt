@@ -1,3 +1,4 @@
 - Add save/restore features, allow save rules into file and restore rules from file for backup.
 - Redesign chain and rule maps
-- Allow add xdpnf into multiple interface
+- Allow add xdpnf into multiple interface withseprerated maps
+- Automation testing
