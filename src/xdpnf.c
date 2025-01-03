@@ -116,6 +116,7 @@ int do_load(const void *cfg, const char *pin_root_path)
 	struct xdp_program *p = NULL;
 	char *filename = NULL;
 	int c_map_fd = -1;
+	int retry = 0;
 
 	DECLARE_LIBBPF_OPTS(bpf_object_open_opts, opts,
 			    .pin_root_path = pin_root_path);
@@ -146,6 +147,8 @@ int do_load(const void *cfg, const char *pin_root_path)
 	silence_libbpf_logging();
 
 retry:
+	if (retry > 3)
+		goto out;
 	xdp_opts.find_filename = "xdpnf_kern.o";
 	xdp_opts.opts = &opts;
 	/* prog_name is NULL, so choose the first program in object */
@@ -153,7 +156,10 @@ retry:
 	err = libxdp_get_error(p);
 	if (err) {
 		if (err == -EPERM && !double_rlimit())
+		{
+			retry++;
 			goto retry;
+		}
 
 		libxdp_strerror(err, errmsg, sizeof(errmsg));
 		pr_warn("Couldn't load BPF program: %s(%d)\n", errmsg, err);
@@ -165,6 +171,7 @@ retry:
 	if (err) {
 		if (err == -EPERM && !double_rlimit()) {
 			xdp_program__close(p);
+			retry++;
 			goto retry;
 		}
 
