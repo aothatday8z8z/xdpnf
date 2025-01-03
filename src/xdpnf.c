@@ -1618,7 +1618,7 @@ static int print_chain(struct chain *c, int c_map_fd, int st_map_fd, int rl_map_
 			break;
 	}
 
-	printf("   %-7s %-7s %-12s %-12s %-20s %-20s %s\n", "pkts", "bytes", "action", "proto", "source", "destination", "details");
+	printf("%-4s %-7s %-7s %-12s %-12s %-20s %-20s %s\n","id", "pkts", "bytes", "action", "proto", "source", "destination", "details");
 	for (int i = 0; i < c->num_rules; i++) {
 		struct rule *r = &c->rule_list[i];
 		struct rule_stats st;
