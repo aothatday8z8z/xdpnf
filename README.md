@@ -1,6 +1,6 @@
 `xdpnf` is a firewall tool based on eBPF. This tool is designed with functions similar to [iptables](https://linux.die.net/man/8/iptables) but leverages the high-speed packet processing power of eBPF/XDP (`xdp` stands for eXpress Data Path, while `nf` stands for netfilter that inspired by nftables). Both IPv4 and **IPv6** are supported! The protocols currently supported are TCP, UDP, ICMP, and ICMPv6.
 
-This project draws inspiration from [xdp-firewall](https://github.com/gamemann/XDP-Firewall) and [xdp-filter](hhttps://github.com/xdp-project/xdp-tools/tree/master/xdp-filter).
+This project draws inspiration from [xdp-firewall](https://github.com/gamemann/XDP-Firewall) and [xdp-filter](https://github.com/xdp-project/xdp-tools/tree/master/xdp-filter).
 
 ## Building & Installation
 `xdpnf` is written in C and need built from source code. Before building, ensure the following packages are installed. These packages are installed via `apt` (Ubuntu, Debian, etc.), but there should be similar package names in other package managers.

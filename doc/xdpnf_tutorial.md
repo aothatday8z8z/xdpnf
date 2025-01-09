@@ -1,7 +1,7 @@
 # Table of contents
 - [1. Introduction](#1)
 	- [1.1. Motivation](#1.1)
-	- [1.2. Architecture and Operation](#1.2)
+		- [1.2. Design Choices](#1.2)
 - [2. User guide](#2)
 	- [2.1. Commands Overview](#2.1)
 	- [2.2. Rule Structure](#2.2)
@@ -20,6 +20,16 @@ Up to the time I wrote this document, there are a few tools for packet filtering
 - [bpf-iptables](https://github.com/mbertrone/bpf-iptables?tab=readme-ov-file): I found this project after I had already written the main basic features for xdpnf. This project aims to "create a tool based on eBPF/XDP with the highest compatibility with the existing iptables and netfilter system". I have reviewed it, and it lacks some features necessary for us such as rate-limit or creating user-defined chains and jumping from one chain to another, while it has some features that are not really necessary for us such as backward compatibility with iptables. However, I will consider it more carefully in the future to improve xdpnf.
 
 Finally, I concluded that developing a completely new firewall tool based on eBPF/XDP was necessary for our purposes and requirements.
+<a name="1.2"></a>
+## 1.2. Design Choices
+- According to my survey, current eBPF-based filters are designed in two directions:
+	1. Divide the filter into multiple small eBPF program blocks, each handling a separate protocol layer and having its own map. The programs are connected by tail calls. Rules are also divided by protocol into the maps of the small programs (connected by rule id). For example, a rule with id 5 matching the source ipv4 address 10.0.0.3 and destination tcp port 80 will be stored as 2 map entries, one entry with key 10.0.0.3 in the source ipv4 map and one entry with key 80 in the destination tcp port map. The advantage of this design is the optimization of both storage space and packet processing speed (no need to use for loops to match each rule, packets only go through the blocks present in the current rule). However, its disadvantage is significantly reducing the flexibility of the filter as mentioned by the author of [xdp-firewall](https://github.com/gamemann/XDP-Firewall?tab=readme-ov-file#performance-with-for-loops). For example, it is very difficult to implement the logic of jumping to another chain. Currently, [xdp-filter](https://github.com/xdp-project/xdp-tools/tree/master/xdp-filter) and [bpf-iptables](https://github.com/mbertrone/bpf-iptables?tab=readme-ov-file) follow this implementation direction.
+	2. Another design direction is to use for loops to iterate through each rule. Rules will be stored in a single map. This method has the opposite advantages/disadvantages compared to the above method, trading performance for allowing complex rule processing such as rate limiting or jumping from one chain to another. [xdp-firewall](https://github.com/gamemann/XDP-Firewall) follows this design.
+	
+From my perspective, I prefer the first implementation because it allows maximizing all the advantages of eBPF such as tail calls, hashmaps, percpu maps, etc. However, with time constraints and work requirements, the second design direction is more feasible for me at the moment. Therefore, `xdpnf` is designed according to the second direction.
+
+`xdpnf` includes multiple chains, with a default chain named `INPUT`. Each chain includes multiple rules, when a packet enters a chain, it is sequentially matched with the rules in the chain from top to bottom (starting from rule id 1). A packet entering xdpnf always enters the `INPUT` chain first, users can create new chains and use goto to jump to those chains. When a packet matches a rule with an action to goto a new chain, it leaves the current chain and continues to be matched from top to bottom with the rules in the new chain.
+
 <a name="2"></a>
 # 2. User guide
 <a name="2.1"></a>

@@ -4,5 +4,6 @@
 - Redesign chain and rule maps: split INPUT chain with others
 - Allow xdpnf in tc hooks for egress traffic
 - Allow add xdpnf into multiple interface with seprerated maps
+- Add return action
 - Allow change chain's policy in rechain command
 - Automation testing
