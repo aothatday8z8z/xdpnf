@@ -29,13 +29,13 @@ make && sudo make install
 ## Quick use
 `xdpnf` is ready after the build. Here are basic commands (requiring root privileges to execute). For more detail about commands, see [xdpnf tutorial](doc/xdpnf_tutorial.md).
 
-### Attach xdpnf to interface eth0
+### Enable xdpnf to interface eth0
 ```bash
-sudo xdpnf load eth0
+sudo xdpnf enable eth0
 ```
-### Detach xdpnf from interface eth0
+### Disable xdpnf from interface eth0
 ```bash
-sudo xdpnf unload eth0
+sudo xdpnf disable eth0
 ``` 
 ### Create new `test` chain with drop policy
 ```bash
