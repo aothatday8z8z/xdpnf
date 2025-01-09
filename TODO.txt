@@ -1,4 +1,8 @@
 - Add save/restore features, allow save rules into file and restore rules from file for backup.
-- Redesign chain and rule maps
-- Allow add xdpnf into multiple interface withseprerated maps
+- match icmp_code and icmp_type in same time
+- Add logic to check wrong cidr ip format 
+- Redesign chain and rule maps: split INPUT chain with others
+- Allow xdpnf in tc hooks for egress traffic
+- Allow add xdpnf into multiple interface with seprerated maps
+- Allow change chain's policy in rechain command
 - Automation testing
