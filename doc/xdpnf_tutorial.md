@@ -1,7 +1,7 @@
 # Table of contents
 - [1. Introduction](#1)
 	- [1.1. Motivation](#1.1)
-		- [1.2. Design Choices](#1.2)
+	- [1.2. Design Choices](#1.2)
 - [2. User guide](#2)
 	- [2.1. Commands Overview](#2.1)
 	- [2.2. Rule Structure](#2.2)
