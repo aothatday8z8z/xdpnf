@@ -8,10 +8,10 @@
 #define RULE_SHIFT 11
 #define CHAIN_SHIFT 5
 #define MAX_RULES_PER_CHAIN 100
-#define MAX_CHAINS 16
+#define MAX_CHAINS 32
 #define MAX_STATS MAX_RULES_PER_CHAIN*MAX_CHAINS
 #define CHAIN_NAME_LEN 32
-#define MAX_CHAIN_DEPTH 2
+#define MAX_JUMP_DEPTH 3
 
 // #define CREATE_RULE_ID(chain_id, rule_index) \
 //     ((((chain_id) & MAX_CHAINS) << RULE_SHIFT) | ((rule_index) & MAX_RULES_PER_CHAIN))

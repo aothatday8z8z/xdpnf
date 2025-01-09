@@ -14,7 +14,6 @@
 #include "xdpnf.h"
 
 
-// TODO: split into default_chain and sub_chains map
 struct 
 {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -302,7 +301,7 @@ static __always_inline int parse_tcphdr(struct hdr_cursor *nh,
 
 
 static __always_inline int process_chain(__u16 pkt_len, struct rule *pkt_hdrs, __u32 chain_id) {
-    for (int depth = 0; depth < MAX_CHAIN_DEPTH; depth++) {
+    for (int depth = 0; depth < MAX_JUMP_DEPTH; depth++) {
         struct chain *c= NULL;
 		__u16 i;
 		c = bpf_map_lookup_elem(&chains_map, &chain_id);

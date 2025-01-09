@@ -350,6 +350,16 @@ const char *get_enum_name(const struct enum_val *vals, unsigned int value)
 	return NULL;
 }
 
+unsigned int get_enum_value(const struct enum_val *vals, const char *name)
+{
+	const struct enum_val *val;
+
+	val = find_enum(vals, name);
+	if (!val)
+		return -1;
+	return val->value;
+}
+
 static const struct opthandler {
 	int (*func)(char *optarg, void *tgt, struct prog_option *opt);
 } handlers[__OPT_MAX] = {

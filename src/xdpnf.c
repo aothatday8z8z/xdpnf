@@ -24,18 +24,6 @@
 #define PROG_NAME "xdpnf"
 #define PROG_KERN_NAME "xdpnf_kern"
 
-enum {
-	TCP_FLAG_CWR = __constant_cpu_to_be32(0x00800000),
-	TCP_FLAG_ECE = __constant_cpu_to_be32(0x00400000),
-	TCP_FLAG_URG = __constant_cpu_to_be32(0x00200000),
-	TCP_FLAG_ACK = __constant_cpu_to_be32(0x00100000),
-	TCP_FLAG_PSH = __constant_cpu_to_be32(0x00080000),
-	TCP_FLAG_RST = __constant_cpu_to_be32(0x00040000),
-	TCP_FLAG_SYN = __constant_cpu_to_be32(0x00020000),
-	TCP_FLAG_FIN = __constant_cpu_to_be32(0x00010000),
-	TCP_RESERVED_BITS = __constant_cpu_to_be32(0x0F000000),
-	TCP_DATA_OFFSET = __constant_cpu_to_be32(0xF0000000)
-};
 
 // Error codes for parsing/decode
 #define PARSE_OK 0
@@ -50,6 +38,49 @@ enum {
 #define PARSE_ERR_INVALID_ACTION        (1<<8)
 #define PARSE_ERR_INVALID_FIELD         (1<<9)
 
+enum {
+	TCP_FLAG_CWR = __constant_cpu_to_be32(0x00800000),
+	TCP_FLAG_ECE = __constant_cpu_to_be32(0x00400000),
+	TCP_FLAG_URG = __constant_cpu_to_be32(0x00200000),
+	TCP_FLAG_ACK = __constant_cpu_to_be32(0x00100000),
+	TCP_FLAG_PSH = __constant_cpu_to_be32(0x00080000),
+	TCP_FLAG_RST = __constant_cpu_to_be32(0x00040000),
+	TCP_FLAG_SYN = __constant_cpu_to_be32(0x00020000),
+	TCP_FLAG_FIN = __constant_cpu_to_be32(0x00010000),
+	TCP_RESERVED_BITS = __constant_cpu_to_be32(0x0F000000),
+	TCP_DATA_OFFSET = __constant_cpu_to_be32(0xF0000000)
+};
+
+enum rule_keys {
+	RULE_KEY_SADDR = 1,
+	RULE_KEY_DADDR,
+	RULE_KEY_TCP_FLAGS,
+	RULE_KEY_SPORT,
+	RULE_KEY_DPORT,
+	RULE_KEY_ICMP_TYPE,
+	RULE_KEY_ICMP_CODE,
+	RULE_KEY_L3_PROTO,
+	RULE_KEY_L4_PROTO,
+	RULE_KEY_RATE_LIMIT,
+	RULE_KEY_ACTION,
+	RULE_KEY_GOTO_CHAIN,
+};
+
+struct enum_val rule_keys[] = {
+	{"saddr", RULE_KEY_SADDR},
+	{"daddr", RULE_KEY_DADDR},
+	{"tcp_flags", RULE_KEY_TCP_FLAGS},
+	{"sport", RULE_KEY_SPORT},
+	{"dport", RULE_KEY_DPORT},
+	{"icmp_type", RULE_KEY_ICMP_TYPE},
+	{"icmp_code", RULE_KEY_ICMP_CODE},
+	{"l3_proto", RULE_KEY_L3_PROTO},
+	{"l4_proto", RULE_KEY_L4_PROTO},
+	{"rate_limit", RULE_KEY_RATE_LIMIT},
+	{"action", RULE_KEY_ACTION},
+	{"goto_chain", RULE_KEY_GOTO_CHAIN},
+};
+
 struct flag_val parse_errors[] = {
 	{"invalid_l3_proto", PARSE_ERR_INVALID_L3_PROTO},
 	{"invalid_l4_proto", PARSE_ERR_INVALID_L4_PROTO},
@@ -62,11 +93,12 @@ struct flag_val parse_errors[] = {
 	{"invalid_action", PARSE_ERR_INVALID_ACTION},
 };
 
-static const struct loadopt {
+
+static const struct enableopt {
 	bool help;
 	struct iface iface;
 	enum xdp_attach_mode mode;
-} defaults_load = {
+} defaults_enable = {
 	.mode = XDP_MODE_NATIVE,
 };
 
@@ -78,17 +110,17 @@ struct enum_val xdp_modes[] = {
        {NULL, 0}
 };
 
-static struct prog_option load_options[] = {
-	DEFINE_OPTION("mode", OPT_ENUM, struct loadopt, mode,
+static struct prog_option enable_options[] = {
+	DEFINE_OPTION("mode", OPT_ENUM, struct enableopt, mode,
 		      .short_opt = 'm',
 		      .typearg = xdp_modes,
 		      .metavar = "<mode>",
-		      .help = "Load XDP program in <mode>; default native"),
-	DEFINE_OPTION("dev", OPT_IFNAME, struct loadopt, iface,
+		      .help = "enable XDP program in <mode>; default native"),
+	DEFINE_OPTION("dev", OPT_IFNAME, struct enableopt, iface,
 		      .positional = true,
 		      .metavar = "ifname",
 		      .required = true,
-		      .help = "Load on device <ifname>"),
+		      .help = "enable on device <ifname>"),
 	END_OPTIONS
 };
 
@@ -108,10 +140,10 @@ static int get_chain_by_name(const char *chain_name, int c_map_fd, struct chain 
 	return err;
 }
 
-int do_load(const void *cfg, const char *pin_root_path)
+int do_enable(const void *cfg, const char *pin_root_path)
 {
 	char errmsg[STRERR_BUFSIZE];
-	const struct loadopt *opt = cfg;
+	const struct enableopt *opt = cfg;
 	int err = EXIT_SUCCESS, lock_fd;
 	struct xdp_program *p = NULL;
 	char *filename = NULL;
@@ -133,7 +165,7 @@ int do_load(const void *cfg, const char *pin_root_path)
 	err = get_pinned_program(&opt->iface, pin_root_path, NULL, &p);
     
 	if (!err) {
-		pr_warn("xdpnf is already loaded on %s\n", opt->iface.ifname);
+		pr_warn("xdpnf is already enabled on %s\n", opt->iface.ifname);
 		xdp_program__close(p);
 		goto out;
 	}
@@ -158,7 +190,7 @@ retry:
 		}
 
 		libxdp_strerror(err, errmsg, sizeof(errmsg));
-		pr_warn("Couldn't load BPF program: %s(%d)\n", errmsg, err);
+		pr_warn("Couldn't enable BPF program: %s(%d)\n", errmsg, err);
 		p = NULL;
 		goto out;
 	}
@@ -176,27 +208,27 @@ retry:
 		goto out;
 	}
 	else {
-		pr_info("XDP program loaded on %s\n", opt->iface.ifname);
+		pr_info("XDP program enabled on %s\n", opt->iface.ifname);
 		// Initialize the default chain
 		struct chain default_chain = {.policy = RL_ACCEPT}; 
 		c_map_fd = get_pinned_map_fd(pin_root_path, "chains_map", NULL);
 		if (c_map_fd < 0) {
-			pr_warn("Couldn't find chain map; is xdpnf loaded\n");
+			pr_warn("Couldn't find chain map; is xdpnf enabled\n");
 			err = EXIT_FAILURE;
 			goto out;
 		}
 
 		int key = 0;
-		err = get_chain_by_name("default", c_map_fd, &default_chain, &key);
+		err = get_chain_by_name("INPUT", c_map_fd, &default_chain, &key);
 		if (err) {
-			pr_debug("Creating default chain\n");
-			memcpy(default_chain.name, "default", sizeof("default"));
+			pr_debug("Creating INPUT chain\n");
+			memcpy(default_chain.name, "INPUT", sizeof("INPUT"));
 			default_chain.num_rules = 0;
 
 			err = bpf_map_update_elem(c_map_fd, &key, &default_chain, BPF_ANY);
 			if (err) {
 				err = -errno;
-				pr_warn("Unable to create default chain: %s\n", strerror(-err));
+				pr_warn("Unable to create INPUT chain: %s\n", strerror(-err));
 				goto out;
 			}
 		}
@@ -210,7 +242,7 @@ out:
 	free(filename);
 	prog_lock_release(lock_fd);
 	if (err)
-		pr_warn("Failed to load xdpnf\n");
+		pr_warn("Failed to enable xdpnf\n");
 	return err;
 }
 
@@ -289,29 +321,29 @@ static int remove_iface_program(const struct iface *iface,
 	return err;
 }
 
-static const struct unloadopt {
+static const struct disableopt {
 	bool all;
 	bool keep;
 	struct iface iface;
-} defaults_unload = {};
+} defaults_disable = {};
 
-static struct prog_option unload_options[] = {
-	DEFINE_OPTION("dev", OPT_IFNAME, struct unloadopt, iface,
+static struct prog_option disable_options[] = {
+	DEFINE_OPTION("dev", OPT_IFNAME, struct disableopt, iface,
 		      .positional = true,
 		      .metavar = "ifname",
-		      .help = "Unload from device <ifname>"),
-	DEFINE_OPTION("all", OPT_BOOL, struct unloadopt, all,
+		      .help = "disable from device <ifname>"),
+	DEFINE_OPTION("all", OPT_BOOL, struct disableopt, all,
 		      .short_opt = 'a',
-		      .help = "Unload from all interfaces"),
-	DEFINE_OPTION("keep-maps", OPT_BOOL, struct unloadopt, keep,
+		      .help = "disable from all interfaces"),
+	DEFINE_OPTION("keep-maps", OPT_BOOL, struct disableopt, keep,
 		      .short_opt = 'k',
-		      .help = "Don't destroy rule table after unloading"),
+		      .help = "Don't destroy rule table after disabling"),
 	END_OPTIONS
 };
 
-int do_unload(const void *cfg, const char *pin_root_path)
+int do_disable(const void *cfg, const char *pin_root_path)
 {
-	const struct unloadopt *opt = cfg;
+	const struct disableopt *opt = cfg;
 	int err = EXIT_SUCCESS, lock_fd;
 	enum xdp_attach_mode mode;
 	struct xdp_program *prog;
@@ -342,7 +374,7 @@ int do_unload(const void *cfg, const char *pin_root_path)
 
 	err = get_pinned_program(&opt->iface, pin_root_path, &mode, &prog);
 	if (err) {
-		pr_warn("xdpnf is not loaded on %s\n", opt->iface.ifname);
+		pr_warn("xdpnf is not enabled on %s\n", opt->iface.ifname);
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -366,9 +398,9 @@ clean_maps:
 out:
 	prog_lock_release(lock_fd);
 	if (err)
-		pr_warn("Failed to unload xdpnf\n");
+		pr_warn("Failed to disable xdpnf\n");
 	else
-		pr_info("XDP program unloaded\n");
+		pr_info("XDP program disabled\n");
 	return err;
 }
 
@@ -411,65 +443,70 @@ static int strcmpns(const char *str1, const char *str2) {
 /* return 0 if success, otherwise return error code */
 static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl, char *goto_chain) {
 	int ret = 0;
-    char fields[256][256];
-    char buffer[1024];
-    char *key, *value;
+	char fields[256][256];
+	char buffer[1024];
+	char *key, *value;
 
 	empty_rule_init(r);
-    strncpy(buffer, rule, sizeof(buffer));
-    buffer[sizeof(buffer) - 1] = '\0'; // Ensure null-terminated
+	strncpy(buffer, rule, sizeof(buffer));
+	buffer[sizeof(buffer) - 1] = '\0'; // Ensure null-terminated
 
-    char *token = strtok(buffer, ",");
-    int field_count = 0;
+	char *token = strtok(buffer, ",");
+	int field_count = 0;
 
-    while (token != NULL && field_count < 256) {
-        strncpy(fields[field_count], token, 256);
-        fields[field_count][256 - 1] = '\0';
-        field_count++;
-        token = strtok(NULL, ",");
-    }
+	while (token != NULL && field_count < 256) {
+		strncpy(fields[field_count], token, 256);
+		fields[field_count][256 - 1] = '\0';
+		field_count++;
+		token = strtok(NULL, ",");
+	}
 
-    // Process each field
-    for (int i = 0; i < field_count; i++) {
-        key = strtok(fields[i], "=");
-        value = strtok(NULL, "=");
+	// Process each field
+	for (int i = 0; i < field_count; i++) {
+		key = strtok(fields[i], "=");
+		value = strtok(NULL, "=");
 
-        if (key && value) {
-            // Handle special cases like `limit` and `tcp_flags`
-            if (strcmpns(key, "l3_proto") == 0) {
-                if (strcmpns(value, "ipv4") == 0) {
-                    r->match_field_flags |= MATCH_IPV4; 
-                } else if (strcmpns(value, "ipv6") == 0) {
-                    r->match_field_flags |= MATCH_IPV6;
-                } else {
-                    ret |= PARSE_ERR_INVALID_L3_PROTO; 
-                }
-            } 
-            else if (strcmpns(key, "saddr") == 0) {
-                char *cidr = strchr(value, '/');
-				int v4prefix = 32; // Default prefix length
-				int v6prefix = 128; // Default prefix length
-                if (cidr) {
-                    *cidr = '\0';
-                    if (r->match_field_flags & MATCH_IPV4) {
-                        v4prefix = atoi(cidr + 1);
-                    } else if (r->match_field_flags & MATCH_IPV6) {
-                        v6prefix = atoi(cidr + 1);
-                    }
-                } 
+		int key_enum = get_enum_value(rule_keys, key);
+		switch (key_enum) {
+			case RULE_KEY_L3_PROTO:
+			{
+				if (strcmpns(value, "ipv4") == 0) {
+					r->match_field_flags |= MATCH_IPV4; 
+				} else if (strcmpns(value, "ipv6") == 0) {
+					r->match_field_flags |= MATCH_IPV6;
+				} else {
+					ret |= PARSE_ERR_INVALID_L3_PROTO; 
+				}
+				pr_debug("parsed l3_proto\n");
+				break;
+			}
+
+			case RULE_KEY_SADDR:
+			{
+				char *cidr = strchr(value, '/');
+				int v4prefix = 32; 
+				int v6prefix = 128;
 
 				if (r->match_field_flags & MATCH_IPV4) {
+					if (cidr) {
+						*cidr = '\0';
+						v4prefix = atoi(cidr + 1);
+					}
 					if (inet_pton(AF_INET, value, &r->src_ip.ipv4.addr) != 1) {
 						ret |= PARSE_ERR_INVALID_IP_ADDR;
 					}
 					r->match_field_flags |= MATCH_SRC_ADDR;
 					r->src_ip.ipv4.mask = htonl((0xFFFFFFFF << (32 - v4prefix)) & 0xFFFFFFFF);
-				} 
-				else if (r->match_field_flags & MATCH_IPV6) {
+				}
+					
+				if (r->match_field_flags & MATCH_IPV6) {
+					if (cidr) {
+						*cidr = '\0';
+						v6prefix = atoi(cidr + 1);
+					}
 					if (inet_pton(AF_INET6, value, &r->src_ip.ipv6.addr) != 1) {
 						ret |= PARSE_ERR_INVALID_IP_ADDR; 
 					}
-					// Calculate the IPv6 mask
 					r->match_field_flags |= MATCH_SRC_ADDR;
 					for (int i = 0; i < 16; i++) {
 						if (v6prefix >= 8) {
@@ -483,32 +520,36 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
 						}
 					}
 				}
-			} 
-			else if (strcmpns(key, "daddr") == 0) {
+				pr_debug("pasred saddr %d, mask %d\n", r->src_ip.ipv4.addr, r->src_ip.ipv4.mask);
+				break;
+			}
+
+			case RULE_KEY_DADDR:
+			{
 				char *cidr = strchr(value, '/');
-				int v4prefix = 32; // Default prefix length
-				int v6prefix = 128; // Default prefix length
-				if (cidr) {
-					*cidr = '\0';
-					if (r->match_field_flags & MATCH_IPV4) {
-                        v4prefix = atoi(cidr + 1);
-                    } else if (r->match_field_flags & MATCH_IPV6) {
-                        v6prefix = atoi(cidr + 1);
-                    }
-				} 
+				int v4prefix = 32; 
+				int v6prefix = 128; 
 
 				if (r->match_field_flags & MATCH_IPV4) {
+					if (cidr) {
+						*cidr = '\0';
+						v4prefix = atoi(cidr + 1);
+					}
 					if (inet_pton(AF_INET, value, &r->dst_ip.ipv4.addr) != 1) {
 						ret |= PARSE_ERR_INVALID_IP_ADDR;
 					}
 					r->match_field_flags |= MATCH_DST_ADDR;
 					r->dst_ip.ipv4.mask = htonl((0xFFFFFFFF << (32 - v4prefix)) & 0xFFFFFFFF);
 				} 
-				else if (r->match_field_flags & MATCH_IPV6) {
+				
+				if (r->match_field_flags & MATCH_IPV6) {
+					if (cidr) {
+						*cidr = '\0';
+						v6prefix = atoi(cidr + 1);
+					}
 					if (inet_pton(AF_INET6, value, &r->dst_ip.ipv6.addr) != 1) {
 						ret |= PARSE_ERR_INVALID_IP_ADDR; 
 					}
-					// Calculate the IPv6 mask
 					r->match_field_flags |= MATCH_DST_ADDR;
 					for (int i = 0; i < 16; i++) {
 						if (v6prefix >= 8) {
@@ -522,8 +563,12 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
 						}
 					}
 				}
+				pr_debug("parsed daddr\n");	
+				break;
 			}
-			else if (strcmpns(key, "l4_proto") == 0) {
+
+			case RULE_KEY_L4_PROTO:
+			{
 				if (strcmpns(value, "udp") == 0) {
 					r->match_field_flags |= MATCH_UDP;
 				} else if (strcmpns(value, "tcp") == 0) {
@@ -535,8 +580,12 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
 				} else {
 					ret |= PARSE_ERR_INVALID_L4_PROTO; 
 				}
-			} 
-			else if (strcmpns(key, "sport") == 0) {
+				pr_debug("parsed l4_proto\n");
+				break;
+			}
+
+			case RULE_KEY_SPORT:
+			{
 				int port = atoi(value);
 				if (port < 0 || port > 65535) {
 					ret |= PARSE_ERR_INVALID_PORT;
@@ -544,48 +593,51 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
 					r->match_field_flags |= MATCH_SPORT;
 					r->sport = htons((uint16_t)port);
 				}
-			} 
-			else if (strcmpns(key, "dport") == 0) {
+				pr_debug("parsed sport\n");
+				break;
+			}
+
+			case RULE_KEY_DPORT:
+			{
 				int port = atoi(value);
 				if (port < 0 || port > 65535) {
 					ret |= PARSE_ERR_INVALID_PORT;
 				} else {
 					r->match_field_flags |= MATCH_DPORT;
 					r->dport = htons((uint16_t)port);
-				}
-			} 
-			else if (strcmpns(key, "tcp_flags") == 0) {
-				char *flag_token = strtok(value, "|");
-                bool valid_flags = TRUE;
-                while (flag_token) {
-                    if (strcmpns(flag_token, "syn") == 0) r->tcp_flags |= TCP_FLAG_SYN;
-                    else if (strcmpns(flag_token, "ack") == 0) r->tcp_flags |= TCP_FLAG_ACK;
-                    else if (strcmpns(flag_token, "fin") == 0) r->tcp_flags |= TCP_FLAG_FIN;
-                    else if (strcmpns(flag_token, "urg") == 0) r->tcp_flags |= TCP_FLAG_URG;
-                    else if (strcmpns(flag_token, "psh") == 0) r->tcp_flags |= TCP_FLAG_PSH;
-                    else if (strcmpns(flag_token, "rst") == 0) r->tcp_flags |= TCP_FLAG_RST;
-                    else if (strcmpns(flag_token, "ece") == 0) r->tcp_flags |= TCP_FLAG_ECE;
-                    else if (strcmpns(flag_token, "cwr") == 0) r->tcp_flags |= TCP_FLAG_CWR;
-                    else {
-                        valid_flags = FALSE;
-                        ret |= PARSE_ERR_INVALID_TCP_FLAGS;
-                    }
-                    flag_token = strtok(NULL, "|");
-                }
-                if (valid_flags) {
-                    r->match_field_flags |= MATCH_TCP_FLAGS;
-                }
+				}			
+				pr_debug("parsed dport\n");
+				break;		
 			}
-			else if (strcmpns(key, "icmp_type") == 0) {
-				int icmp_type = atoi(value);
-				if (icmp_type < 0 || icmp_type > 255) {
-					ret |= PARSE_ERR_INVALID_ICMP_TYPE;
-				} else {
-					r->match_field_flags |= MATCH_ICMP_TYPE;
-					r->icmp_type = (uint8_t)icmp_type;
+			case RULE_KEY_TCP_FLAGS:
+			{
+				char *flag_token = strtok(value, "|");
+				bool valid_flags = TRUE;
+				while (flag_token) {
+					if (strcmpns(flag_token, "syn") == 0) r->tcp_flags |= TCP_FLAG_SYN;
+					else if (strcmpns(flag_token, "ack") == 0) r->tcp_flags |= TCP_FLAG_ACK;
+					else if (strcmpns(flag_token, "fin") == 0) r->tcp_flags |= TCP_FLAG_FIN;
+					else if (strcmpns(flag_token, "urg") == 0) r->tcp_flags |= TCP_FLAG_URG;
+					else if (strcmpns(flag_token, "psh") == 0) r->tcp_flags |= TCP_FLAG_PSH;
+					else if (strcmpns(flag_token, "rst") == 0) r->tcp_flags |= TCP_FLAG_RST;
+					else if (strcmpns(flag_token, "ece") == 0) r->tcp_flags |= TCP_FLAG_ECE;
+					else if (strcmpns(flag_token, "cwr") == 0) r->tcp_flags |= TCP_FLAG_CWR;
+					else {
+						valid_flags = FALSE;
+						ret |= PARSE_ERR_INVALID_TCP_FLAGS;
+					}
+					flag_token = strtok(NULL, "|");
 				}
-			} 
-			else if (strcmpns(key, "icmp_code") == 0) {
+
+				if (valid_flags) {
+					r->match_field_flags |= MATCH_TCP_FLAGS;
+				}
+				pr_debug("parsed tcp_flags\n");
+				break;
+			}
+
+			case RULE_KEY_ICMP_CODE:
+			{
 				int icmp_code = atoi(value);
 				if (icmp_code < 0 || icmp_code > 255) {
 					ret |= PARSE_ERR_INVALID_ICMP_CODE;
@@ -594,15 +646,32 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
 					r->match_field_flags |= MATCH_ICMP_CODE;
 					r->icmp_code = (uint8_t)icmp_code;
 				}
-			} 
-			else if (strcmpns(key, "limit") == 0) {
-				char *rate_limit_str = strtok(value, "|");
-                char *burst_size_str = strtok(NULL, "|");
-                char *limit_type_str = strtok(NULL, "|");
+				pr_debug("parsed icmp_code\n");
+				break;
+			}
 
-                if (rate_limit_str && burst_size_str && limit_type_str) {
-                    rl->rate_limit = atoi(rate_limit_str);
-                    rl->bucket_size = atoi(burst_size_str);
+			case RULE_KEY_ICMP_TYPE:
+			{
+				int icmp_type = atoi(value);
+				if (icmp_type < 0 || icmp_type > 255) {
+					ret |= PARSE_ERR_INVALID_ICMP_TYPE;
+				} else {
+					r->match_field_flags |= MATCH_ICMP_TYPE;
+					r->icmp_type = (uint8_t)icmp_type;
+				}		
+				pr_debug("parsed icmp_type\n");
+				break;		
+			}
+
+			case RULE_KEY_RATE_LIMIT:
+			{
+				char *rate_limit_str = strtok(value, "|");
+				char *burst_size_str = strtok(NULL, "|");
+				char *limit_type_str = strtok(NULL, "|");
+
+				if (rate_limit_str && burst_size_str && limit_type_str) {
+					rl->rate_limit = atoi(rate_limit_str);
+					rl->bucket_size = atoi(burst_size_str);
 					// rl->rate_limit *= TOKEN_VALUE;
 					rl->bucket_size *= TOKEN_VALUE;
 
@@ -615,60 +684,107 @@ static int decode_rule(const char *rule, struct rule *r, struct rate_limiter *rl
 						rl->bucket_size = rl->rate_limit;
 					}
 
-                    if (strcmpns(limit_type_str, "pps") == 0) {
-                        rl->type = LIMIT_PPS;
-                    } 
-                    else if (strcmpns(limit_type_str, "bps") == 0) {
-                        rl->type = LIMIT_BPS;
-                    }
-                    else if (strcmpns(limit_type_str, "kbps") == 0) {
-                        rl->type = LIMIT_BPS;
-                        rl->rate_limit *= 1024;
+					if (strcmpns(limit_type_str, "pps") == 0) {
+						rl->type = LIMIT_PPS;
+					} 
+					else if (strcmpns(limit_type_str, "bps") == 0) {
+						rl->type = LIMIT_BPS;
+					}
+					else if (strcmpns(limit_type_str, "kbps") == 0) {
+						rl->type = LIMIT_BPS;
+						rl->rate_limit *= 1024;
 						rl->bucket_size *= 1024;
-                    }
-                    else if (strcmpns(limit_type_str, "kpps") == 0) {
-                        rl->type = LIMIT_PPS;
-                        rl->rate_limit *= 1024;
+					}
+					else if (strcmpns(limit_type_str, "kpps") == 0) {
+						rl->type = LIMIT_PPS;
+						rl->rate_limit *= 1024;
 						rl->bucket_size *= 1024;
-                    }
-                    else {
-                        ret |= PARSE_ERR_INVALID_RATE_LIMIT;
-                    }
+					}
+					else {
+						ret |= PARSE_ERR_INVALID_RATE_LIMIT;
+					}
 
-                    r->match_field_flags |= MATCH_RATE_LIMIT;
-                } else {
-                    ret |= PARSE_ERR_INVALID_RATE_LIMIT;
-                }
+					r->match_field_flags |= MATCH_RATE_LIMIT;
+				} else {
+					ret |= PARSE_ERR_INVALID_RATE_LIMIT;
+				}
+				pr_debug("parsed rate_limit\n");
+				break;
 			}
-			
-			else if (strcmpns(key, "action") == 0) {
+
+			case RULE_KEY_ACTION:
+			{
 				if (strcmpns(value, "drop") == 0) {
 					r->action = RL_DROP;
-				} 
-				else if (strcmpns(value, "accept") == 0) {
+				} else if (strcmpns(value, "accept") == 0) {
 					r->action = RL_ACCEPT;
-				} 
-				else {
+				} else {
 					ret |= PARSE_ERR_INVALID_ACTION;
 				}
+				pr_debug("parsed action\n");
+				break;
 			}
-			else if (strcmpns(key, "goto") == 0) {
+
+			case RULE_KEY_GOTO_CHAIN:
+			{
 				r->action = RL_JUMP;
-				strncpy(goto_chain, value, 32);
+				strncpy(goto_chain, value, CHAIN_NAME_LEN);
+				pr_debug("parsed goto_chain\n");
+				break;
 			}
-        } else {
-            pr_warn("Invalid field: %s\n", fields[i]);
-			ret |= PARSE_ERR_INVALID_FIELD;
-        }
-    }
-    return ret;
+			default:
+				pr_warn("Invalid field: %s\n", fields[i]);
+				ret |= PARSE_ERR_INVALID_FIELD;
+		}
+	}
+
+	if (r->match_field_flags & MATCH_IPV4 && r->match_field_flags & MATCH_IPV6) {
+		pr_warn("Cannot match both IPv4 and IPv6\n");
+		ret |= PARSE_ERR_INVALID_L3_PROTO;
+	}
+
+	if (r->match_field_flags & MATCH_TCP && r->match_field_flags & MATCH_UDP) {
+		pr_warn("Cannot match both TCP and UDP\n");
+		ret |= PARSE_ERR_INVALID_L4_PROTO;
+	}
+
+	if (r->match_field_flags & MATCH_ICMP && r->match_field_flags & MATCH_ICMPV6) {
+		pr_warn("Cannot match both ICMP and ICMPv6\n");
+		ret |= PARSE_ERR_INVALID_L4_PROTO;
+	}
+
+	if (r->match_field_flags & MATCH_ICMP_CODE && !(r->match_field_flags & MATCH_ICMP)) {
+		pr_warn("Cannot match ICMP code without ICMP\n");
+		ret |= PARSE_ERR_INVALID_ICMP_CODE;
+	}
+
+	if (r->match_field_flags & MATCH_ICMP_TYPE && !(r->match_field_flags & MATCH_ICMP)) {
+		pr_warn("Cannot match ICMP type without ICMP\n");
+		ret |= PARSE_ERR_INVALID_ICMP_TYPE;
+	}
+
+	if ((r->match_field_flags & MATCH_ICMP_CODE) && !(r->match_field_flags & MATCH_ICMP_TYPE)) {
+		pr_warn("Cannot match ICMP code without ICMP type\n");
+		ret |= PARSE_ERR_INVALID_ICMP_CODE;
+	}
+
+	if (r->match_field_flags & MATCH_TCP_FLAGS && !(r->match_field_flags & MATCH_TCP)) {
+		pr_warn("Cannot match TCP flags without TCP\n");
+		ret |= PARSE_ERR_INVALID_TCP_FLAGS;
+	}
+
+	if (r->action != RL_JUMP && r->action != RL_DROP && r->action != RL_ACCEPT) {
+		pr_warn("\"action\" must be specificed and is drop, accept or goto\n");
+		ret |= PARSE_ERR_INVALID_ACTION;
+	}
+	return ret;
 }
 
 struct appendopt {
 	char *chain;
 	char *rule;
 } defaults_append = {
-	.chain = "default"
+	.chain = "INPUT"
 };
 
 
@@ -676,7 +792,7 @@ static struct prog_option append_options[] = {
     DEFINE_OPTION("chain", OPT_STRING, struct appendopt, chain,
               .metavar = "<chain_name>",
 			  .short_opt = 'c',
-              .help = "Chain name. If not specified, append to default chain"),
+              .help = "Chain name. If not specified, append to INPUT chain"),
 	DEFINE_OPTION("rule", OPT_STRING, struct appendopt, rule,
 		      .metavar = "rule_string",
               .required = true,
@@ -705,7 +821,7 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 	// Get chain map	
 	c_map_fd = get_pinned_map_fd(pin_root_path, "chains_map", NULL);
 	if (c_map_fd < 0) {
-		pr_warn("Couldn't find chain map; is xdpnf loaded\n");
+		pr_warn("Couldn't find chain map; is xdpnf enabled?\n");
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -735,17 +851,6 @@ int do_append(__unused const void *cfg, __unused const char *pin_root_path)
 		err = EXIT_FAILURE;
 		goto out;
 	}
-	
-	pr_debug("Parsed rule: l3_proto=%s, l4_proto=%s, saddr=%s, daddr=%s, sport=%d, dport=%d, tcp_flags=0x%x, icmp_type=%d, icmp_code=%d\n",
-		(r.match_field_flags & MATCH_IPV4) ? "ipv4" : "ipv6",
-		(r.match_field_flags & MATCH_TCP) ? "tcp" : (r.match_field_flags & MATCH_UDP) ? "udp" : (r.match_field_flags & MATCH_ICMP) ? "icmp" : "icmpv6",
-		(r.match_field_flags & MATCH_IPV4) ? inet_ntoa(*(struct in_addr *)&r.src_ip.ipv4.addr) : inet_ntop(AF_INET6, &r.src_ip.ipv6, parse_err, sizeof(parse_err)),
-		(r.match_field_flags & MATCH_IPV4) ? inet_ntoa(*(struct in_addr *)&r.dst_ip.ipv4.addr) : inet_ntop(AF_INET6, &r.dst_ip.ipv6, parse_err, sizeof(parse_err)),
-		(r.match_field_flags & MATCH_SPORT) ? ntohs(r.sport) : 0,
-		(r.match_field_flags & MATCH_DPORT) ? ntohs(r.dport) : 0,
-		(r.match_field_flags & MATCH_TCP_FLAGS) ? r.tcp_flags : 0,
-		(r.match_field_flags & MATCH_ICMP_TYPE) ? r.icmp_type : 0,
-		(r.match_field_flags & MATCH_ICMP_CODE) ? r.icmp_code : 0);
 	
 	// Add rate limiter if needed
 	if (r.match_field_flags & MATCH_RATE_LIMIT) {
@@ -888,7 +993,7 @@ int do_newchain(__unused const void *cfg, __unused const char *pin_root_path)
 	// Get chain map	
 	c_map_fd = get_pinned_map_fd(pin_root_path, "chains_map", NULL);
 	if (c_map_fd < 0) {
-		pr_warn("Couldn't find chain map; is xdpnf loaded?\n");
+		pr_warn("Couldn't find chain map; is xdpnf enabled?\n");
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -920,7 +1025,7 @@ int do_newchain(__unused const void *cfg, __unused const char *pin_root_path)
 		err = EXIT_FAILURE;
 		goto out;
 	}
-	pr_info("Created chain %s with id %d\n", opt->chain, c_key);
+	pr_info("Created chain %s.", opt->chain);
 
 out:
 	if (c_map_fd >= 0)
@@ -933,7 +1038,7 @@ struct deleteopt {
 	char *chain_name;
 	char *rule_str;
 	int rule_id;
-} defaults_delete = {.chain_name = "default"};
+} defaults_delete = {.chain_name = "INPUT"};
 
 static struct prog_option delete_options[] = {
 	DEFINE_OPTION("rule_id", OPT_U32, struct deleteopt, rule_id,
@@ -954,6 +1059,7 @@ static struct prog_option delete_options[] = {
 
 static int rule_compare(struct rule *a, struct rule *b) {
 	if (a->match_field_flags != b->match_field_flags) {
+		pr_debug("match_field_flags %d %d\n", a->match_field_flags, b->match_field_flags);
 		return FALSE;
 	}
 	if (a->action != b->action) {
@@ -1029,7 +1135,7 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 	// Get chain map	
 	c_map_fd = get_pinned_map_fd(pin_root_path, "chains_map", NULL);
 	if (c_map_fd < 0) {
-		pr_warn("Couldn't find chain map; is xdpnf loaded\n");
+		pr_warn("Couldn't find chain map; is xdpnf enabled?\n");
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -1066,7 +1172,6 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 	else if (opt->rule_str) {
 		err = decode_rule(opt->rule_str, &r, &rl, goto_chain);
 		if (err != PARSE_OK) {
-			pr_warn("Couldn't parse rule: %s\n", opt->rule_str);
 			print_flags(parse_err, sizeof(parse_err), parse_errors, err);
 			err = EXIT_FAILURE;
 			goto out;
@@ -1087,7 +1192,7 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 
 		for (int i = 0; i < c.num_rules; i++) {
 			if (rule_compare(&r, &c.rule_list[i])) {
-				rule_idx = i-1;
+				rule_idx = i;
 				r = c.rule_list[i];
 				break;
 			}
@@ -1133,9 +1238,12 @@ int do_delete(__unused const void *cfg, __unused const char *pin_root_path)
 
 
 	// Delete rule from chain
+	for (int i=rule_idx; i < c.num_rules; i++) {
+			c.rule_list[i] = c.rule_list[i+1];
+	}
 	c.num_rules -= 1;
 	struct rule empty = {.match_field_flags = 0};
-	c.rule_list[rule_idx] = empty;
+	c.rule_list[c.num_rules] = empty;
 	err = bpf_map_update_elem(c_map_fd, &c_key, &c, BPF_ANY);
 	if (err) {
 		err = -errno;
@@ -1177,6 +1285,12 @@ int do_delchain(__unused const void *cfg, __unused const char *pin_root_path)
 	const struct delchainopt *opt = cfg;
 	struct chain c = {};
 
+	if (strcmp(opt->chain_name, "INPUT") == 0) {
+		pr_warn("Cannot delete INPUT chain\n");
+		err = EXIT_FAILURE;
+		goto out;
+	}
+
 	// Acquire lock
 	lock_fd = prog_lock_acquire(pin_root_path);
 	if (lock_fd < 0)
@@ -1185,7 +1299,7 @@ int do_delchain(__unused const void *cfg, __unused const char *pin_root_path)
 	// Get chain map	
 	c_map_fd = get_pinned_map_fd(pin_root_path, "chains_map", NULL);
 	if (c_map_fd < 0) {
-		pr_warn("Couldn't find chain map; is xdpnf loaded?\n");
+		pr_debug("Couldn't find chain map; is xdpnf enabled?\n");
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -1196,6 +1310,12 @@ int do_delchain(__unused const void *cfg, __unused const char *pin_root_path)
 		goto out;
 	}
 	pr_debug("Found chain %s with id %d\n", opt->chain_name, c_key);
+
+	if (c.num_rules > 0) {
+		pr_warn("Chain %s is not empty\n", opt->chain_name);
+		err = EXIT_FAILURE;
+		goto out;
+	}
 
 	// Find rules jump to this chain
 	int key, prev_key;
@@ -1264,7 +1384,7 @@ int do_rechain(__unused const void *cfg, __unused const char *pin_root_path)
 	// Get chain map	
 	c_map_fd = get_pinned_map_fd(pin_root_path, "chains_map", NULL);
 	if (c_map_fd < 0) {
-		pr_warn("Couldn't find chain map; is xdpnf loaded?\n");
+		pr_debug("Couldn't find chain map; is xdpnf enabled?\n");
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -1297,13 +1417,13 @@ out:
 
 struct flushopt {
 	char *chain_name;
-} defaults_flush = {.chain_name = "default"};
+} defaults_flush = {.chain_name = "INPUT"};
 
 static struct prog_option flush_options[] = {
 	DEFINE_OPTION("chain", OPT_STRING, struct flushopt, chain_name,
 			  .metavar = "chain_name",
 			  .positional = true,
-			  .help = "Chain name, if not specified, default chain will be flushed"),
+			  .help = "Chain name, if not specified, INPUT chain will be flushed"),
 	END_OPTIONS
 };
 
@@ -1322,7 +1442,7 @@ int do_flush(__unused const void *cfg, __unused const char *pin_root_path)
 	// Get chain map	
 	c_map_fd = get_pinned_map_fd(pin_root_path, "chains_map", NULL);
 	if (c_map_fd < 0) {
-		pr_warn("Couldn't find chain map; is xdpnf loaded?\n");
+		pr_warn("Couldn't find chain map; is xdpnf enabled?\n");
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -1401,7 +1521,7 @@ struct replaceopt {
 	int dest_id;
 	char *new_rule;
 } defaults_replace = {
-	.chain = "default"
+	.chain = "INPUT"
 };
 
 static struct prog_option replace_options[] = {
@@ -1443,7 +1563,7 @@ int do_replace(__unused const void *cfg, __unused const char *pin_root_path)
 	// Get chain map	
 	c_map_fd = get_pinned_map_fd(pin_root_path, "chains_map", NULL);
 	if (c_map_fd < 0) {
-		pr_warn("Couldn't find chain map; is xdpnf loaded\n");
+		pr_warn("Couldn't find chain map; is xdpnf enabled?\n");
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -1646,7 +1766,7 @@ static int print_chain(struct chain *c, int c_map_fd, int st_map_fd, int rl_map_
 		// Format hit count
 		err = bpf_map_lookup_elem(st_map_fd, &r->stats_id, &st);
 		if (err) {
-			pr_warn("Couldn't find stats for rule %d\n", i+1);
+			pr_debug("Couldn't find stats for rule %d\n", i+1);
 			continue;
 		}
 
@@ -1833,14 +1953,14 @@ int do_list(__unused const void *cfg, __unused const char *pin_root_path)
 	// Get chain map	
 	c_map_fd = get_pinned_map_fd(pin_root_path, "chains_map", NULL);
 	if (c_map_fd < 0) {
-		pr_warn("Couldn't find chain map; is xdpnf loaded?\n");
+		pr_warn("Couldn't find chain map; is xdpnf enabled?\n");
 		err = EXIT_FAILURE;
 		goto out;
 	}
 
 	st_map_fd = get_pinned_map_fd(pin_root_path, "stats_map", NULL);
 	if (st_map_fd < 0) {
-		pr_warn("Couldn't find stats map.\n");
+		pr_debug("Couldn't find stats map.\n");
 		err = EXIT_FAILURE;
 		goto out;
 	}
@@ -2022,7 +2142,7 @@ out:
 // 	// Get chain map	
 // 	c_map_fd = get_pinned_map_fd(pin_root_path, "chains_map", &c_info);
 // 	if (c_map_fd < 0) {
-// 		pr_warn("Couldn't find chain map; is xdpnf loaded?\n");
+// 		pr_warn("Couldn't find chain map; is xdpnf enabled?\n");
 // 		err = EXIT_FAILURE;
 // 		goto out;
 // 	}
@@ -2030,7 +2150,7 @@ out:
 // 	// Get rate limiter map
 // 	rl_map_fd = get_pinned_map_fd(pin_root_path, "limiters_map", &c_info);
 // 	if (rl_map_fd < 0) {
-// 		pr_warn("Couldn't find rate limiter map; is xdpnf loaded?\n");
+// 		pr_warn("Couldn't find rate limiter map; is xdpnf enabled?\n");
 // 		err = EXIT_FAILURE;
 // 		goto out;
 // 	}
@@ -2086,8 +2206,8 @@ int do_help(__unused const void *cfg, __unused const char *pin_root_path)
 		"Usage: xdpnf COMMAND [options]\n"
 		"\n"
 		"COMMAND can be one of:\n"
-		"       load            load xdpnf on an interface\n"
-		"       unload          unload xdpnf from an interface\n"
+		"       enable            enable xdpnf on an interface\n"
+		"       disable          disable xdpnf from an interface\n"
 		"       append          append a rule to a chain\n"
 		"       delete          delete a rule from a chain\n"
 		// "       insert          insert a rule to a chain\n"
@@ -2099,14 +2219,24 @@ int do_help(__unused const void *cfg, __unused const char *pin_root_path)
 		"       rechain         rename a chain\n"
 		"       save            save all rules into a file\n"
 		"       restore         restore all rules from a file\n"
+		"       info            print xdpnf info\n"
 		"\n"
 		"Use 'xdpnf COMMAND --help' to see options for each command\n");
 	return -1;
 }
 
+int do_info(__unused const void *cfg, __unused const char *pin_root_path)
+{
+	// fprintf(stderr, "xdpnf version: %s\n", XDPNF_VERSION);
+	fprintf(stderr, "MAX_CHAINS: %d\n", MAX_CHAINS);
+	fprintf(stderr, "MAX_RULES_PER_CHAIN: %d\n", MAX_RULES_PER_CHAIN);
+	fprintf(stderr, "MAX_JUMP_DEPTH: %d\n", MAX_JUMP_DEPTH);
+	return -1;
+}
+
 static const struct prog_command cmds[] = {
-	DEFINE_COMMAND(load, "Load xdpnf on an interface"),
-	DEFINE_COMMAND(unload, "Unload xdpnf from an interface"),
+	DEFINE_COMMAND(enable, "enable xdpnf on an interface"),
+	DEFINE_COMMAND(disable, "disable xdpnf from an interface"),
 	DEFINE_COMMAND(append, "Append a rule to a chain"),
     DEFINE_COMMAND(delete, "Delete a rule from a chain"),
     // DEFINE_COMMAND(insert, "Insert a rule to a chain"),
@@ -2118,13 +2248,14 @@ static const struct prog_command cmds[] = {
     DEFINE_COMMAND(rechain, "Rename a chain"),
     // DEFINE_COMMAND(save, "Save all rules into a file"),
 	// DEFINE_COMMAND(restore, "Restore all rules from a file"),
+	{ .name = "info", .func = do_info, .no_cfg = true },
 	{ .name = "help", .func = do_help, .no_cfg = true },
 	END_COMMANDS
 };
 
 union all_opts {
-	struct loadopt load;
-	struct unloadopt unload;
+	struct enableopt enable;
+	struct disableopt disable;
 	struct appendopt append;
 	struct deleteopt delete;
 	// struct insertopt insert;
@@ -2143,6 +2274,5 @@ int main(int argc, char **argv)
 	if (argc > 1)
 		return dispatch_commands(argv[1], argc - 1, argv + 1, cmds,
 					 sizeof(union all_opts), PROG_NAME, true);
-
 	return do_help(NULL, NULL);
 }

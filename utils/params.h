@@ -126,6 +126,7 @@ struct prog_command {
 	}
 
 const char *get_enum_name(const struct enum_val *vals, unsigned int value);
+unsigned int get_enum_value(const struct enum_val *vals, const char *name);
 void print_flags(char *buf, size_t buf_len, const struct flag_val *flags,
 		 unsigned long flags_val);
 void print_addr(char *buf, size_t buf_len, const struct ip_addr *addr);
