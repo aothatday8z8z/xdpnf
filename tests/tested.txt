@@ -1,3 +1,0 @@
-- Build:
-    - Ubuntu 20.04, Kernel: 5.4.0-204-generic
-    
