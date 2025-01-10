@@ -53,7 +53,7 @@ From my perspective, I prefer the first implementation because it allows maximiz
 
 <a name="2.2"></a>
 ## 2.2. Rule structure
-In `xdpnf`, rules will have a key/value structure as follows: `key1=value1,key2=value2,....`. Keys include two types: **match** and **target**. Match are keys that describe the characteristics of the packet that the rule targets (e.g., IP address, port, protocol, ...). Target are keys that specify the action that the rule will take on the packet if it matches the match. To avoid errors, key/value pairs in the rule should follow the format and order as in the table below (See [command samples](doc/command_sample.txt) for specific rule examples):
+In `xdpnf`, rules will have a key/value structure as follows: `key1=value1,key2=value2,....`. Keys include two types: **match** and **target**. Match are keys that describe the characteristics of the packet that the rule targets (e.g., IP address, port, protocol, ...). Target are keys that specify the action that the rule will take on the packet if it matches the match. To avoid errors, key/value pairs in the rule should follow the format and order as in the table below (See [command samples](command_sample.txt) for specific rule examples):
 
 |Key|Type|Corresponding Value|Description|Example|
 |---|---|---|---------------|---|
