@@ -33,9 +33,9 @@ make && sudo make install
 ```bash
 sudo xdpnf enable eth0
 ```
-### Disable xdpnf from interface eth0
+### Disable xdpnf from all interfaces
 ```bash
-sudo xdpnf disable eth0
+sudo xdpnf disable 
 ``` 
 ### Create new `test` chain with drop policy
 ```bash

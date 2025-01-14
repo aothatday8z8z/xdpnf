@@ -322,21 +322,12 @@ static int remove_iface_program(const struct iface *iface,
 }
 
 static const struct disableopt {
-	bool all;
 	bool keep;
-	struct iface iface;
 } defaults_disable = {};
 
 static struct prog_option disable_options[] = {
-	DEFINE_OPTION("dev", OPT_IFNAME, struct disableopt, iface,
-		      .positional = true,
-		      .metavar = "ifname",
-		      .help = "disable from device <ifname>"),
-	DEFINE_OPTION("all", OPT_BOOL, struct disableopt, all,
-		      .short_opt = 'a',
-		      .help = "disable from all interfaces"),
 	DEFINE_OPTION("keep-maps", OPT_BOOL, struct disableopt, keep,
-		      .short_opt = 'k',
+			  .short_opt = 'k',
 		      .help = "Don't destroy rule table after disabling"),
 	END_OPTIONS
 };
@@ -356,35 +347,13 @@ int do_disable(const void *cfg, const char *pin_root_path)
 	if (lock_fd < 0)
 		return lock_fd;
 
-	if (opt->all) {
-		pr_debug("Removing xdpnf from all interfaces\n");
-		err = iterate_pinned_programs(pin_root_path,
-					      remove_iface_program,
-					      (void *)pin_root_path);
-		if (err && err != -ENOENT)
-			goto out;
-		goto clean_maps;
-	}
-
-	if (!opt->iface.ifindex) {
-		pr_warn("Must specify ifname or --all\n");
-		err = EXIT_FAILURE;
-		goto out;
-	}
-
-	err = get_pinned_program(&opt->iface, pin_root_path, &mode, &prog);
-	if (err) {
-		pr_warn("xdpnf is not enabled on %s\n", opt->iface.ifname);
-		err = EXIT_FAILURE;
-		goto out;
-	}
-
-	err = remove_iface_program(&opt->iface, prog, mode,
-				   (void *)pin_root_path);
-	if (err)
+	pr_debug("Removing xdpnf from all interfaces\n");
+	err = iterate_pinned_programs(pin_root_path,
+						remove_iface_program,
+						(void *)pin_root_path);
+	if (err && err != -ENOENT)
 		goto out;
 
-clean_maps:
 	if (opt->keep) {
 		pr_debug("Not removing pinned maps because of --keep-maps option\n");
 		goto out;
@@ -2207,7 +2176,7 @@ int do_help(__unused const void *cfg, __unused const char *pin_root_path)
 		"\n"
 		"COMMAND can be one of:\n"
 		"       enable            enable xdpnf on an interface\n"
-		"       disable          disable xdpnf from an interface\n"
+		"       disable          disable xdpnf from all interface\n"
 		"       append          append a rule to a chain\n"
 		"       delete          delete a rule from a chain\n"
 		// "       insert          insert a rule to a chain\n"
@@ -2236,7 +2205,7 @@ int do_info(__unused const void *cfg, __unused const char *pin_root_path)
 
 static const struct prog_command cmds[] = {
 	DEFINE_COMMAND(enable, "enable xdpnf on an interface"),
-	DEFINE_COMMAND(disable, "disable xdpnf from an interface"),
+	DEFINE_COMMAND(disable, "disable xdpnf from all interfaces"),
 	DEFINE_COMMAND(append, "Append a rule to a chain"),
     DEFINE_COMMAND(delete, "Delete a rule from a chain"),
     // DEFINE_COMMAND(insert, "Insert a rule to a chain"),

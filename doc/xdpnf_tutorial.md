@@ -38,7 +38,7 @@ From my perspective, I prefer the first implementation because it allows maximiz
 |Command|Example|Meaning|
 |---|---|---|
 |`enable`|xdpnf enable ens8|enable xdpnf on an interface|
-|`disable`|xdpnf disable ens8|disable xdpnf on an interface|
+|`disable`|xdpnf disable|disable xdpnf on all interfaces|
 |`append`|xdpnf append l4_proto=ipv4,l3_proto=tcp,saddr=10.0.1.0/24,action=drop|Add a rule to the end of the chain.|
 |`delete`|xdpnf delete -i 4 INPUT|Delete a rule from the chain. This can be done in two ways; by entering the entire rule to match (as in the append command example), or by specifying the rule number you want to delete. Rules are numbered from the beginning to the end for each chain, starting with number 1. If the chain is not specified, it will be the INPUT chain.|
 |`replace`|xdpnf replace -i 4 -r l4_proto=ipv4,l3_proto=tcp,saddr=10.0.1.0/24,action=drop|Replace the rule with the specified id. It will work similarly to the delete command, but instead of deleting, it will replace it with a new entry.|
