@@ -74,8 +74,9 @@ In `xdpnf`, rules will have a key/value structure as follows: `key1=value1,key2=
 # 3. Limitations
 Currently, `xdpnf` has the following limitations:
 - Currently, `xdpnf` only supports attaching to XDP hooks, so it can only filter packets in the ingress direction (from the outside network into the system). The opposite direction (packets from the system to the outside) can be implemented based on TC hooks similar to how [bpf-iptables](https://github.com/mbertrone/bpf-iptables?tab=readme-ov-file) does.
-- To ensure accurate operation, `xdpnf` should only be attached to a single interface. Attaching to multiple interfaces at once does not cause any errors, but I am not sure if the programs share the same map.
-- Currently, `xdpnf` supports a maximum of 32 chains, 100 rules per chain. A packet is allowed to pass through a maximum of 3 chains for goto. This limitation partly comes from the eBPF verifier limiting the complexity of the program, as well as the current design of `xdpnf` (I feel like I am overusing too many for loops and conditional statements when matching packets).  
+- ~~To ensure accurate operation, `xdpnf` should only be attached to a single interface. Attaching to multiple interfaces at once does not cause any errors, but I am not sure if the programs share the same map.~~
+	- When xdpnf is enabled on multiple interfaces, they share a single set of rules (the map is pinned at /sys/fs/bpf/xdpnf). 
+- Currently, `xdpnf` supports a maximum of 32 chains, 100 rules per chain. A packet is allowed to pass through a maximum of 3 chains for goto. This limitation partly comes from the eBPF verifier limiting the complexity of the program, as well as the current design of `xdpnf` (I feel like I am overusing too many for loops and conditional statements when matching packets).
 - Currently, `xdpnf` should be run on systems with kernel version >= 5.15 (see tested systems below). In theory, it can also run on lower kernel versions because I do not use too many new eBPF features (as long as that version supports XDP programs). 
 
 I will try to improve these limitations in the future.  
